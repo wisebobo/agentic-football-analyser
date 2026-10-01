@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Agentic Football · Match Intel Console
 
 一个面向 **AWS Agentic Football Cup**（5v5 虚拟足球锦标赛）的**全栈赛事情报台**。
