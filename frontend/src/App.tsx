@@ -17,7 +17,7 @@ interface Ctx {
 const AppCtx = createContext<Ctx>(null as unknown as Ctx);
 export const useApp = () => useContext(AppCtx);
 
-const TABS = ["比赛分析", "数据统计", "赛事重播", "赛事排行", "赛事配置"] as const;
+const TABS = ["赛事配置", "赛事排行", "赛事重播", "比赛分析", "数据统计"] as const;
 
 function UtcClock() {
   const [now, setNow] = useState(() => new Date());
@@ -93,16 +93,16 @@ function App() {
             ))}
           </nav>
         </header>
-        <main key={current?.id ?? -1}>
+        <main key={current?.id ?? -1} className={tab === 2 ? "wide" : undefined}>
           {tournaments.length === 0 ? (
-            <div className="empty">尚未创建赛事 · 请先到 05 赛事配置 创建</div>
+            <div className="empty">尚未创建赛事 · 请先到 01 赛事配置 创建</div>
           ) : current ? (
             [
+              <Setup key="u" tournament={current} />,
+              <Leaderboard key="l" tournament={current} />,
+              <Replay key="r" tournament={current} />,
               <Analysis key="a" tournament={current} />,
               <Stats key="s" tournament={current} />,
-              <Replay key="r" />,
-              <Leaderboard key="l" tournament={current} />,
-              <Setup key="u" tournament={current} />,
             ][tab]
           ) : null}
         </main>

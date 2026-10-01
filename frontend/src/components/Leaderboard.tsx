@@ -4,6 +4,18 @@ import type { LeaderboardRow, Tournament } from "../types";
 
 const RANK_CLS: Record<number, string> = { 1: "rank-1", 2: "rank-2", 3: "rank-3" };
 
+// COEP require-corp 会拦截跨域 <img>（CloudFront 不带 CORP 头），
+// 外链图片一律改走后端代拉的同源代理（Unity 侧队徽同款通道）。
+const RPROXY = "/unity/rproxy";
+function logoSrc(url: string): string {
+  try {
+    const u = new URL(url, window.location.origin);
+    return u.origin === window.location.origin ? url : `${RPROXY}?u=${encodeURIComponent(url)}`;
+  } catch {
+    return url;
+  }
+}
+
 export default function Leaderboard({ tournament }: { tournament: Tournament }) {
   const [snap, setSnap] = useState<{ fetched_at: string; rows: LeaderboardRow[] } | null>(null);
   const [q, setQ] = useState("");
@@ -33,7 +45,7 @@ export default function Leaderboard({ tournament }: { tournament: Tournament }) 
         <span className="sub">
           {snap
             ? `快照 ${new Date(snap.fetched_at).toLocaleString("zh-CN")} · 共 ${snap.rows.length} 队`
-            : "尚无快照（请先在 ⑤ 赛事配置 中拉取）"}
+            : "尚无快照（请先在 ① 赛事配置 中拉取）"}
         </span>
       </div>
 
@@ -64,7 +76,7 @@ export default function Leaderboard({ tournament }: { tournament: Tournament }) 
                   <tr key={r.team_id} className={ours ? "ours" : RANK_CLS[rank ?? -1] ?? ""}>
                     <td className={RANK_CLS[rank ?? -1] ?? ""}>{rank}</td>
                     <td>
-                      {r.icon_url ? <img src={r.icon_url} alt="" /> : null}
+                      {r.icon_url ? <img src={logoSrc(r.icon_url)} alt="" /> : null}
                       {r.team_name}
                       {ours && <span className="badge">我方</span>}
                     </td>

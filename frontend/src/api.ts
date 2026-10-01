@@ -1,5 +1,5 @@
 import type {
-  Tournament, MatchRow, MatchFull, LeaderboardResp, FetchRun, Stats,
+  Tournament, MatchRow, MatchFull, LeaderboardResp, FetchRun, Stats, ReplayData,
 } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -30,6 +30,7 @@ export const api = {
 
   matches: (tid: number) => req<MatchRow[]>(`/api/tournaments/${tid}/matches`),
   matchFull: (mid: string) => req<MatchFull>(`/api/matches/${mid}`),
+  replay: (mid: string) => req<ReplayData>(`/api/matches/${mid}/replay`),
 
   stats: (tid: number) => req<Stats>(`/api/stats?tournament_id=${tid}`),
   leaderboard: (tid: number) => req<LeaderboardResp>(`/api/tournaments/${tid}/leaderboard`),

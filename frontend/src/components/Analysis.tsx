@@ -4,7 +4,8 @@ import {
   ScatterChart, Scatter, ReferenceLine,
 } from "recharts";
 import { api } from "../api";
-import type { MatchFull, MatchRow, Tournament } from "../types";
+import type { MatchFull, MatchRow, Tournament, ReplayData } from "../types";
+import ShotTrajectory from "./ShotTrajectory";
 
 // Sportscast 图表配色
 const C = {
@@ -33,6 +34,7 @@ export default function Analysis({ tournament }: { tournament: Tournament }) {
   const [matches, setMatches] = useState<MatchRow[]>([]);
   const [mid, setMid] = useState<string>("");
   const [data, setData] = useState<MatchFull | null>(null);
+  const [replay, setReplay] = useState<ReplayData | null>(null);
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -43,8 +45,21 @@ export default function Analysis({ tournament }: { tournament: Tournament }) {
     if (!mid) return;
     setErr("");
     setData(null);
+    setReplay(null);
     api.matchFull(mid).then(setData).catch((e) => setErr((e as Error).message));
+    api.replay(mid).then(setReplay).catch(() => { /* 无 replay 数据时静默降级 */ });
   }, [mid]);
+
+  // 比赛下拉按比赛时间倒序（无 starting_at 的排最后），与 Replay.tsx 观感一致
+  const sortedMatches = useMemo(
+    () =>
+      [...matches].sort((a, b) => {
+        const ta = a.starting_at ? new Date(a.starting_at).getTime() : -Infinity;
+        const tb = b.starting_at ? new Date(b.starting_at).getTime() : -Infinity;
+        return tb - ta;
+      }),
+    [matches],
+  );
 
   const cmdData = useMemo(() => {
     if (!data) return [];
@@ -80,7 +95,7 @@ export default function Analysis({ tournament }: { tournament: Tournament }) {
         <label className="sel-wrap">比赛：
           <select value={mid} onChange={(e) => setMid(e.target.value)} disabled={!matches.length}>
             <option value="">{matches.length ? "选择一场比赛…" : "暂无比赛数据（请先拉取）"}</option>
-            {matches.map((m) => (
+            {sortedMatches.map((m) => (
               <option key={m.match_id} value={m.match_id}>
                 {m.is_practice ? "[练习赛] " : ""}{m.home_team_name} {m.home_score} - {m.away_score} {m.away_team_name} · {fmtMatchTime(m.starting_at)}
               </option>
@@ -129,6 +144,8 @@ export default function Analysis({ tournament }: { tournament: Tournament }) {
               </ul>
             </div>
           )}
+
+          <ShotTrajectory replay={replay} goals={data?.goals ?? null} />
 
           <div className="chart-box">
             <h4>双方指令分布</h4>

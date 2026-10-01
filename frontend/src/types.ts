@@ -96,6 +96,45 @@ export interface FetchRun {
   error_text: string | null;
 }
 
+export interface ReplayCmd {
+  pid: number | null;
+  team: number | null;
+  cmd: string | null;
+  tx: number | null;
+  ty: number | null;
+  sprint: number;
+  /** 命令完整参数（引擎 result[].parameters 原样透出）；老数据可能为 null */
+  params?: Record<string, unknown> | null;
+  /** 0=一次性 / >0=持续 N 秒 / -1=持续到被覆盖 */
+  duration?: number | null;
+}
+
+export interface ReplayTick {
+  i: number;
+  t: number | null;
+  gameTime: number | null;
+  playMode: string | null;
+  score: { home: number | null; away: number | null } | null;
+  ball: { x: number; z: number } | null;
+  poss: unknown;
+  poss_team: number | null;
+  cmds: ReplayCmd[];
+  players: { pid: number; team: number; x: number; y: number; tx: number; ty: number }[];
+  sides_present: number[];
+  our_team: number | null;
+}
+
+export interface ReplayData {
+  tick_count: number;
+  available: boolean;
+  player_positions_available: boolean;
+  warnings: string[];
+  our_side: string | null;
+  home_name: string | null;
+  away_name: string | null;
+  ticks: ReplayTick[];
+}
+
 export interface Stats {
   total: number;
   known_side: number;

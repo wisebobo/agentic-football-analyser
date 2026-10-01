@@ -144,10 +144,11 @@ function installWsProbe(): void {
     return ws;
   } as unknown as typeof WebSocket;
   WSProbe.prototype = _WS.prototype;
-  WSProbe.CONNECTING = _WS.CONNECTING;
-  WSProbe.OPEN = _WS.OPEN;
-  WSProbe.CLOSING = _WS.CLOSING;
-  WSProbe.CLOSED = _WS.CLOSED;
+  const P = WSProbe as unknown as Record<string, unknown>;
+  P.CONNECTING = _WS.CONNECTING;
+  P.OPEN = _WS.OPEN;
+  P.CLOSING = _WS.CLOSING;
+  P.CLOSED = _WS.CLOSED;
   window.WebSocket = WSProbe;
 }
 

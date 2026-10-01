@@ -27,6 +27,7 @@ export default defineConfig({
       // 这里只把数据类 API 代理到后端 8000：
       "/unity/matches": { target: "http://127.0.0.1:8000", changeOrigin: true },
       "/unity/replays": { target: "http://127.0.0.1:8000", changeOrigin: true },
+      "/unity/replay-prompts": { target: "http://127.0.0.1:8000", changeOrigin: true },
       "/unity/rproxy": { target: "http://127.0.0.1:8000", changeOrigin: true },
     },
     // Unity WebGL 线程模式需要 SharedArrayBuffer，页面（顶层文档）必须带 COOP/COEP

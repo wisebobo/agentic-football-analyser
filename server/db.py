@@ -422,8 +422,33 @@ def _extract_gs(gs):
     return ball, score, poss, players_available
 
 
+def _clean_params(p):
+    """parameters → 仅保留 JSON 基础类型（前端直接渲染，不丢字段）。空则 None。"""
+    if not isinstance(p, dict):
+        return None
+    out = {}
+    for k, v in p.items():
+        if v is None or isinstance(v, (bool, int, float, str)):
+            out[str(k)] = v
+    return out or None
+
+
 def _extract_cmds(res):
-    """该 tick 五人指令集 → 紧凑列表。"""
+    """该 tick 五人指令集 → 紧凑列表。
+
+    除几何用的 tx/ty/sprint 外，**原样透出 `parameters` 与 `duration`**：
+    实测 9 类命令全部带参（`tick_prompts.result_json` 全库 7940 条指令统计）——
+      MOVE_TO       target_x / target_y / sprint
+      PRESS_BALL    intensity            （0.4~1）
+      SHOOT         aim_location / power （CENTER 92% / 力度 1 占 76%）
+      INTERCEPT     aggressive
+      FOLLOW_PLAYER target_player_id / target_team / distance
+      MARK          target_player_id / tightness
+      PASS          target_player_id / type（GROUND|AERIAL|THROUGH）
+      GK_DISTRIBUTE target_player_id / method（KICK|THROW）
+      CLEAR_OVERRIDE 无参
+    只挑 tx/ty 会让 SHOOT/FOLLOW_PLAYER/MARK… 全部显示成「—」。
+    """
     if not isinstance(res, list):
         return []
     out = []
@@ -434,12 +459,17 @@ def _extract_cmds(res):
         tx = _num(c.get("target_x")) if _num(c.get("target_x")) is not None else _num(par.get("target_x"))
         ty = _num(c.get("target_y")) if _num(c.get("target_y")) is not None else _num(par.get("target_y"))
         sprint = c.get("sprint", par.get("sprint"))
+        dur = _num(c.get("duration"))
         out.append({
             "pid": c.get("playerId", c.get("id")),
             "team": c.get("teamId", c.get("team")),
             "cmd": c.get("command", c.get("commandType")),
             "tx": tx, "ty": ty,
             "sprint": 1 if sprint else 0,
+            # 完整参数（前端按命令语义排版）
+            "params": _clean_params(par),
+            # duration 逐命令：0=一次性 / >0=持续 N 秒 / -1=持续到被覆盖（非恒定值）
+            "duration": dur,
         })
     return out
 

@@ -177,6 +177,8 @@ main {
   flex-direction: column;
   overflow: auto;
 }
+/* 赛事重播 tab（index 2）：放开限宽，让 Unity 画布占满宽屏；其余 tab 仍限宽 1240 */
+main.wide { max-width: none; }
 /* 页面切换：staggered rise */
 @keyframes rise {
   from { opacity: 0; transform: translateY(14px); }
