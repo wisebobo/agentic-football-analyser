@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>video-diagnostic</title>
+<style>
+  body{font:14px/1.5 monospace;background:#111;color:#eee;padding:16px}
+  #out{white-space:pre-wrap}
+  video{width:320px;background:#000;display:block;margin:12px 0}
+  .ok{color:#4ade80}.bad{color:#f87171}
+</style>
+</head>
+<body>
+<h3>H.264 / mp4 播放能力诊断</h3>
+<div id="out">running…</div>
+<video id="v" muted playsinline controls></video>
+<script>
+  const v = document.getElementById('v');
+  const out = document.getElementById('out');
+  const lines = [];
+  function report(s){ lines.push(s); out.innerHTML = lines.map(x=>x.replace(/ERROR|FAIL|[^_]FAIL/,'<span class="bad">$&</span>')).join('\n'); document.title = 'diag:'+lines.join(' || '); }
+
+  report('UA = ' + navigator.userAgent);
+  report('isSecureContext = ' + window.isSecureContext);
+  report('crossOriginIsolated = ' + (window.crossOriginIsolated===true));
+  report('canPlayType(video/mp4) = "' + v.canPlayType('video/mp4') + '"');
+  report('canPlayType(avc1.640032) = "' + v.canPlayType('video/mp4; codecs="avc1.640032"') + '"');
+
+  v.addEventListener('loadedmetadata', () => report('OK loadedmetadata  ' + v.videoWidth + 'x' + v.videoHeight + '  dur=' + v.duration));
+  v.addEventListener('canplay',        () => report('OK canplay'));
+  v.addEventListener('error',          () => { const e = v.error; report('ERROR code=' + (e && e.code) + '  msg=' + (e && e.message)); });
+  v.addEventListener('stalled',        () => report('WARN stalled'));
+  v.addEventListener('emptied',        () => report('WARN emptied'));
+
+  v.src = 'StreamingAssets/video/opening_anim.mp4';
+  v.load();
+  v.play().then(()=>report('OK play() resolved')).catch(e=>report('ERROR play() rejected: ' + e.name + ' ' + e.message));
+  setTimeout(()=>report('-- t=6s currentTime=' + v.currentTime + ' readyState=' + v.readyState + ' networkState=' + v.networkState), 6000);
+</script>
+</body>
+</html>

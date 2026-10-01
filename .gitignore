@@ -1,0 +1,85 @@
+# ============================================================
+# Agentic Football — .gitignore
+# 适配：Python(FastAPI) 后端 + React/Vite 前端 + Unity WebGL + SQLite
+# 目标：符合大型 MIT 开源项目规范
+# ============================================================
+
+# ---------- 本地工具/IDE 状态（用户级，非项目源码） ----------
+/.workbuddy
+/.trae
+/.trellis
+
+# ---------- 操作系统垃圾文件 ----------
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# ---------- 编辑器 / IDE ----------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~~
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+htmlcov/
+/server/.venv
+.venv/
+venv/
+env/
+
+# ---------- Node / 前端 ----------
+node_modules/
+/frontend/node_modules
+/frontend/dist
+/frontend/.vite
+*.tsbuildinfo
+.eslintcache
+.npm
+
+# ---------- 密钥 / 环境变量（开源项目最高危） ----------
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+secrets.json
+credentials.json
+# 如需提交示例，保留 .env.example：
+!.env.example
+
+# ---------- 日志 / 临时文件 ----------
+*.log
+logs/
+*.tmp
+*.temp
+~*
+
+# ---------- 数据库 / 生成数据（非源码） ----------
+/server/data/
+
+# ---------- 通用构建/二进制产物 ----------
+build/
+out/
+*.exe
+*.dll
+*.so
+*.dylib
+/docs
+/tools
+/prompts

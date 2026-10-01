@@ -1,0 +1,537 @@
+/* ============ Agentic Football · Sportscast 设计系统 ============ */
+:root {
+  /* 调色板：深墨底 + 球场绿主色 + 转播台辅色 */
+  --bg: #04080a;
+  --panel: #0c1419;
+  --panel-2: #101c23;
+  --line: #1b2b34;
+  --line-soft: #14232c;
+  --text: #e9f3f4;
+  --sub: #7f95a3;
+  --pitch: #2fe07f;      /* 球场绿 · 主 accent */
+  --pitch-dim: rgba(47, 224, 127, 0.14);
+  --amber: #ffc832;      /* 时间 / 警示 */
+  --home: #3fb6ff;       /* 主队 / 我方 */
+  --away: #ff4d6d;       /* 客队 / 对方 */
+  --agent: #a78bfa;      /* Agent 遥测 */
+  --ok: #2fe07f;
+  --err: #ff4d6d;
+  --warn: #ffc832;
+  --muted: #55697a;
+
+  --font-display: "Barlow Condensed", "Arial Narrow", "Microsoft YaHei", sans-serif;
+  --font-body: "Manrope", "Segoe UI", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", "Consolas", monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  background-color: var(--bg);
+  /* 顶部球场绿辉光 + 细 scanline 叠加 */
+  background-image:
+    radial-gradient(1100px 380px at 50% -120px, rgba(47, 224, 127, 0.07), transparent),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.012) 0 1px, transparent 1px 3px);
+  background-attachment: fixed;
+}
+
+/* ============ 顶栏 ============ */
+.app { height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 10px 22px 0;
+  background: rgba(12, 20, 25, 0.92);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+/* 品牌块：绿方块 AF + 字标 + 副标 */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+}
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  background: var(--pitch);
+  color: #04170c;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: 0.02em;
+}
+.brand-text { display: flex; flex-direction: column; line-height: 1.15; }
+.brand-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.brand-sub {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--sub);
+}
+
+.sel-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--sub);
+  font-size: 13px;
+}
+
+/* UTC 实时时钟 */
+.utc-clock {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--sub);
+  padding-bottom: 10px;
+}
+.utc-clock b { color: var(--text); font-weight: 500; }
+.pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--pitch);
+  box-shadow: 0 0 6px var(--pitch);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+/* 编号 Tab：绿色下划线式 */
+nav {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  width: 100%;
+  order: 5;
+  overflow-x: auto;
+}
+.tab {
+  position: relative;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--sub);
+  padding: 10px 14px 12px;
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.tab-num {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.1em;
+}
+.tab:hover { color: var(--text); }
+.tab.active {
+  color: var(--text);
+  border-bottom-color: var(--pitch);
+}
+.tab.active .tab-num { color: var(--pitch); }
+
+main {
+  flex: 1;
+  min-height: 0;
+  padding: 22px 22px 48px;
+  max-width: 1240px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+/* 页面切换：staggered rise */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+main > * { animation: rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+main > *:nth-child(2) { animation-delay: 0.06s; }
+main > *:nth-child(3) { animation-delay: 0.12s; }
+
+.empty {
+  text-align: center;
+  padding: 70px 0;
+  color: var(--sub);
+  font-family: var(--font-display);
+  font-size: 18px;
+  letter-spacing: 0.08em;
+  border: 1px dashed var(--line);
+  background: var(--panel);
+}
+.empty::before {
+  content: "";
+  display: block;
+  width: 46px;
+  height: 4px;
+  background: var(--pitch);
+  margin: 0 auto 18px;
+}
+
+/* ============ 卡片（HUD 角括号） ============ */
+.card {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 18px 20px;
+  margin-bottom: 18px;
+  flex: 1;
+  min-height: 0;
+}
+section.card > h2 {
+  margin: 0 0 10px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+section.card > h2::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 14px;
+  background: var(--pitch);
+  margin-right: 10px;
+  vertical-align: -1px;
+}
+/* HUD 角括号：左上 / 右下 */
+.card::before,
+.card::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+}
+.card::before {
+  top: -1px;
+  left: -1px;
+  border-top: 2px solid var(--pitch);
+  border-left: 2px solid var(--pitch);
+}
+.card::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 2px solid var(--pitch);
+  border-right: 2px solid var(--pitch);
+}
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.card-head h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.card-head h3::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 15px;
+  background: var(--pitch);
+  margin-right: 10px;
+  vertical-align: -2px;
+}
+h4 {
+  margin: 8px 0;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.sub { color: var(--sub); font-size: 12px; }
+.row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.row.gap { gap: 14px; margin-bottom: 12px; }
+
+.msg { font-size: 12px; font-family: var(--font-mono); }
+.msg.err { color: var(--err); }
+.msg.warn { color: var(--warn); }
+.hint { color: var(--sub); font-size: 12px; line-height: 1.7; margin: 8px 0; }
+
+/* ============ 表单 / 控件 ============ */
+select,
+input[type="text"],
+input[type="url"],
+input.search,
+input:not([type]) {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: var(--font-body);
+}
+select { min-width: 180px; }
+select:focus,
+input:focus {
+  outline: none;
+  border-color: var(--pitch);
+}
+input[type="text"],
+input[type="url"],
+input:not([type]) { width: 100%; min-width: 160px; }
+input[type="checkbox"] { accent-color: var(--pitch); }
+
+label { color: var(--sub); font-size: 12px; }
+
+button {
+  background: var(--pitch);
+  border: none;
+  color: #04170c;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 7px 18px;
+  cursor: pointer;
+  /* 斜切平行四边形 */
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  transition: opacity 0.15s, background 0.15s;
+}
+button:hover { background: #56ef9a; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button.btn-primary { min-width: 120px; }
+
+/* ============ 图表 ============ */
+.chart-box { margin-top: 16px; }
+.goals-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--sub);
+  font-size: 12px;
+}
+.goals-list li { margin: 3px 0; }
+.goals-list b {
+  font-family: var(--font-mono);
+  color: var(--amber);
+  font-weight: 500;
+  margin-right: 6px;
+}
+
+/* ============ 统计卡 ============ */
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.stat-card {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  padding: 14px 14px 10px;
+  color: var(--sub);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.stat-card .num {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.02em;
+  margin-bottom: 2px;
+}
+.stat-card .num.win { color: var(--pitch); }
+.stat-card .num.lose { color: var(--away); }
+
+/* ============ 表格 ============ */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-size: 12px;
+}
+th,
+td {
+  border-bottom: 1px solid var(--line-soft);
+  padding: 8px 10px;
+  text-align: left;
+}
+th {
+  color: var(--sub);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+td { color: var(--text); }
+td .hint { margin: 4px 0 0; }
+
+/* 排行榜 */
+table.lb tbody tr { transition: background 0.12s; }
+table.lb tbody tr:hover { background: var(--pitch-dim); }
+tr.ours td,
+table.lb tr.ours { background: var(--pitch-dim); }
+tr.ours { box-shadow: inset 3px 0 0 var(--pitch); }
+table.lb tr.ours td { border-left: none; }
+td.rank-1 { color: var(--amber); font-family: var(--font-mono); font-weight: 700; }
+td.rank-2 { color: #cfd8dc; font-family: var(--font-mono); font-weight: 600; }
+td.rank-3 { color: #d98a4a; font-family: var(--font-mono); font-weight: 600; }
+tr.ours td.rank-1, tr.ours td.rank-2, tr.ours td.rank-3 { color: var(--text); }
+.badge {
+  background: var(--pitch);
+  color: #04170c;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  margin-left: 8px;
+  letter-spacing: 0.1em;
+}
+td img { vertical-align: middle; width: 22px; height: 22px; border-radius: 50%; margin-right: 4px; }
+td.pts {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--pitch);
+}
+
+input.search { width: 100%; margin-top: 10px; }
+
+/* Setup 表格 */
+.tbl td { font-family: var(--font-mono); font-size: 11px; color: var(--sub); }
+.tbl td:first-child { color: var(--text); }
+tr.row-mine td { background: var(--pitch-dim); color: var(--text); }
+tr.row-mine td:first-child { color: var(--pitch); }
+
+/* ============ 重播（转播台比分牌 + 球场） ============ */
+.scoreboard {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 12px 18px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  margin-bottom: 14px;
+}
+.scoreboard::before,
+.scoreboard::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+}
+.scoreboard::before {
+  top: -1px;
+  left: -1px;
+  border-top: 2px solid var(--pitch);
+  border-left: 2px solid var(--pitch);
+}
+.scoreboard::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 2px solid var(--pitch);
+  border-right: 2px solid var(--pitch);
+}
+.sb-team {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.sb-team.home { color: var(--home); }
+.sb-team.away { color: var(--away); }
+.sb-score {
+  font-family: var(--font-display);
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.sb-time {
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-size: 13px;
+  color: var(--amber);
+  letter-spacing: 0.1em;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.sb-time.live::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--pitch);
+  box-shadow: 0 0 8px var(--pitch);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.sb-live {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--pitch);
+  letter-spacing: 0.2em;
+}
+
+.rp-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.rp-controls input[type="range"] {
+  flex: 1;
+  min-width: 180px;
+  accent-color: var(--pitch);
+}
+.rp-controls select { min-width: 70px; }
+.rp-controls button { padding: 5px 12px; font-size: 12px; }
+.rp-info { line-height: 1.8; margin-top: 14px; font-family: var(--font-mono); font-size: 11px; }
+.rp-info b { color: var(--amber); font-weight: 500; }

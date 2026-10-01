@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Agentic Soccer · 本地回放客户端</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0e13;color:#cfd6e4;
+            font-family:system-ui,"Segoe UI","Microsoft YaHei",sans-serif}
+  #wrap{display:flex;flex-direction:column;height:100%}
+  #bar{padding:8px 12px;font-size:13px;background:#121722;border-bottom:1px solid #222a38;
+       display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  #bar input{background:#0b0e13;border:1px solid #2a3346;color:#cfd6e4;border-radius:4px;padding:3px 6px}
+  #bar button{background:#2f6df6;border:0;color:#fff;border-radius:4px;padding:4px 14px;cursor:pointer}
+  #bar button:hover{background:#3f7cff}
+  #progress{color:#8ba0c4}
+  #hint{color:#7c8aa5;font-size:12px}
+  #warn{padding:14px 16px;background:#3a1d1d;border-bottom:1px solid #7a2b2b;
+        color:#ff9b9b;font-size:14px;line-height:1.7;display:none}
+  #warn b{color:#fff}
+  #unity-canvas{flex:1;width:100%;background:#000;display:block}
+  #log{position:fixed;right:0;bottom:0;width:44vw;height:34vh;margin:0;overflow:auto;
+       background:rgba(6,9,14,.94);border-left:1px solid #222a38;border-top:1px solid #222a38;
+       color:#9fe3b0;font:11px/1.45 ui-monospace,Consolas,monospace;padding:6px 8px;
+       white-space:pre-wrap;z-index:9;display:none}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="bar">
+    <span>matchId</span>
+    <input id="matchId" size="40" placeholder="vendor_match_id" value="1dfddd08-333a-48d8-8571-1af248d6cbfa"/>
+    <select id="pick" style="max-width:330px;background:#0b0e13;border:1px solid #2a3346;color:#cfd6e4;border-radius:4px;padding:3px 6px">
+      <option value="">— 载入本地赛程… —</option>
+    </select>
+    <span>server</span>
+    <input id="server" size="40" value="https://game.agentic-football.aws.dev"/>
+    <button id="boot">Load</button>
+    <button id="logbtn" style="background:#2a3346">日志</button>
+    <span id="progress">idle</span>
+    <span id="hint">matchId 用 <b>vendor_match_id</b>（不是门户的 match_id）</span>
+  </div>
+  <div id="warn"></div>
+  <canvas id="unity-canvas" tabindex="-1"></canvas>
+</div>
+<pre id="log">=== log ===</pre>
+
+<!-- 网络改写必须在 Unity 之前装载 -->
+<script>
+(function () {
+  var LOG = [];
+  var el = document.getElementById('log');
+  window.__push = push;   // 供后面第二个 <script> 里的赛程/预检代码使用
+  function push(s) {
+    LOG.push(s);
+    if (el) { el.textContent = LOG.join('\n'); el.scrollTop = el.scrollHeight; }
+    try { console.log(s); } catch (e) {}   // 镜像到 DevTools, 便于直接复制粘贴
+  }
+
+  // ---------- 官方接口的 CORS 绕行 ----------
+  // 1) /replay/info 里给的 presigned S3 URL: 任何 Origin 都没有 ACAO → 浏览器直连必被拦。
+  //    改写成 {server}/match/{id}/replay (relay 自带回放代理, 允许跨域); 若本机服务提供
+  //    /__rproxy 则再经它转发, 拿"原样 gzip 字节"(不带 Content-Encoding) 交给客户端 gunzip。
+  // 2) 队伍 logo 在 cloudfront, 同样无 ACAO → 一并走 /__rproxy。
+  var _fetch = window.fetch;
+  var PROXY_OK = false;
+  // 探测本机是否提供 /__rproxy (serve_unity.py 提供; 400 = 在, 404 = 不在)
+  _fetch.call(window, '/__rproxy?u=').then(function (r) {
+    PROXY_OK = (r.status === 400);
+    push('[probe] /__rproxy present = ' + PROXY_OK + '  (status ' + r.status + ')');
+    console.log('[probe] /__rproxy present =', PROXY_OK, 'status', r.status);
+  }).catch(function (e) {
+    PROXY_OK = false;
+    push('[probe] /__rproxy MISSING → ' + e);
+    console.log('[probe] /__rproxy MISSING', e);
+  });
+
+  // ---------- 0) 关键探针: WebSocket (MagicOnion GrpcWebSocketBridge 走浏览器原生 WS) ----------
+  // 客户端用 ClientWebSocket / websocket-sharp → 底层就是 window.WebSocket。
+  // 连接失败(Retrying connection)只能在这里看到真实 URL 与关闭码, 所以必须打点。
+  var _WS = window.WebSocket;
+  function WSProbe(url, protocols) {
+    var t0 = Date.now();
+    var ws = (protocols === undefined) ? new _WS(url) : new _WS(url, protocols);
+    var tag = '[ws] ' + url + (protocols === undefined ? '' : '  subprotocol=' + JSON.stringify(protocols));
+    push(tag + '  → CONNECTING');
+    console.log(tag, '→ CONNECTING');
+    ws.addEventListener('open', function () {
+      push(tag + '  → OPEN ✓ (' + (Date.now() - t0) + 'ms)');
+      console.log(tag, '→ OPEN ✓', (Date.now() - t0) + 'ms');
+    });
+    ws.addEventListener('error', function () {
+      push(tag + '  → ERROR ✗');
+      console.log(tag, '→ ERROR ✗');
+    });
+    ws.addEventListener('close', function (e) {
+      var msg = tag + '  → CLOSE code=' + e.code + ' reason=' + JSON.stringify(e.reason)
+              + ' wasClean=' + e.wasClean + ' (' + (Date.now() - t0) + 'ms)';
+      push(msg);
+      console.log(msg);
+      if (e.code === 1006) {
+        push('      ↑ 1006 = 握手被拒/网络不通 (不是服务端主动关闭)。看 Network 面板的 WS 帧行。');
+      }
+    });
+    return ws;
+  }
+  WSProbe.prototype = _WS.prototype;
+  ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'].forEach(function (k) { WSProbe[k] = _WS[k]; });
+  window.WebSocket = WSProbe;
+
+  // ---------- 0b) XMLHttpRequest 探针 (UnityWebRequest 在 WebGL 上也可能走 XHR) ----------
+  var _open = XMLHttpRequest.prototype.open;
+  var _send = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (method, url) {
+    this.__url = url;
+    this.__isReplayInfo = /\/match\/[^\/]+\/replay\/info/.test(url || '');
+    push('[xhr] ' + method + ' ' + url);
+    return _open.apply(this, arguments);
+  };
+  XMLHttpRequest.prototype.send = function () {
+    var self = this;
+    if (self.__isReplayInfo) {
+      self.addEventListener('load', function () {
+        try {
+          var j = JSON.parse(self.responseText);
+          var m = /^(https?:\/\/[^\/]+)\/match\/([^\/]+)\/replay\/info/.exec(self.__url);
+          if (j && j.downloadUrl && m) {
+            var relayUrl = m[1] + '/match/' + m[2] + '/replay';
+            var nu = PROXY_OK ? location.origin + '/__rproxy?u=' + encodeURIComponent(relayUrl) : relayUrl;
+            j.downloadUrl = nu;
+            var txt = JSON.stringify(j);
+            Object.defineProperty(self, 'responseText', { value: txt, configurable: true });
+            Object.defineProperty(self, 'response', { value: txt, configurable: true });
+            push('[xhr-rewrite] downloadUrl -> ' + nu);
+            console.log('[xhr-rewrite] downloadUrl ->', nu);
+          }
+        } catch (e) { push('[xhr-rewrite] skip: ' + e); }
+      });
+    }
+    return _send.apply(this, arguments);
+  };
+
+  window.fetch = function (input, init) {
+    var url = (typeof input === 'string') ? input : (input && input.url) || '';
+    var proxied = location.origin + '/__rproxy?u=' + encodeURIComponent(url);
+
+    if (/^https?:\/\/[^\/]*cloudfront\.net\//i.test(url)) {
+      if (PROXY_OK) { push('[fetch] logo via proxy  ' + url); return _fetch.call(this, proxied, init); }
+      return _fetch.apply(this, arguments);
+    }
+    push('[fetch] ' + url);
+    return _fetch.apply(this, arguments).then(function (r) {
+      if (!r.ok) { push('   ↳ HTTP ' + r.status + ' ' + url); console.log('[fetch] HTTP', r.status, url); }
+      var m = /^(https?:\/\/[^\/]+)\/match\/([^\/]+)\/replay\/info/.exec(url);
+      if (m && r.ok) {
+        return r.text().then(function (txt) {
+          var j = null;
+          try { j = JSON.parse(txt); } catch (e) {}
+          if (j && j.downloadUrl) {
+            var relayUrl = m[1] + '/match/' + m[2] + '/replay';
+            j.downloadUrl = PROXY_OK
+              ? location.origin + '/__rproxy?u=' + encodeURIComponent(relayUrl)
+              : relayUrl;
+            push('[rewrite] downloadUrl -> ' + j.downloadUrl);
+            txt = JSON.stringify(j);
+          }
+          return new Response(txt, {
+            status: r.status, statusText: r.statusText,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        });
+      }
+      return r;
+    });
+  };
+})();
+</script>
+
+<script src="asw-agentic-soccer-web.loader.js"></script>
+<script>
+/* file:// 防呆: Unity WebGL 必须走 HTTP */
+if (location.protocol === 'file:') {
+  var w = document.getElementById('warn');
+  w.style.display = 'block';
+  w.innerHTML = '⚠ 你是用 <b>file://</b> 打开本页 —— 浏览器会拦截 fetch(.data/.wasm)，Unity 无法加载。<br>'
+              + '请改用本机 HTTP 服务访问：<b>http://127.0.0.1:8788/</b>（不要双击 HTML 文件）。';
+  document.getElementById('boot').disabled = true;
+}
+
+var progress = document.getElementById('progress');
+var logEl = document.getElementById('log');
+
+// 用 URL 查询参数初始化输入框 (客户端就是读 page URL 的 ?matchId=&server=)
+(function () {
+  var q = new URLSearchParams(location.search);
+  if (q.get('matchId')) document.getElementById('matchId').value = q.get('matchId');
+  if (q.get('server'))  document.getElementById('server').value  = q.get('server');
+})();
+
+document.getElementById('logbtn').addEventListener('click', function () {
+  logEl.style.display = logEl.style.display === 'block' ? 'none' : 'block';
+});
+if (new URLSearchParams(location.search).get('log') === '1') logEl.style.display = 'block';
+
+document.getElementById('boot').addEventListener('click', boot);
+
+function boot() {
+  if (window.__booted) return; window.__booted = true;
+  var matchId = document.getElementById('matchId').value.trim();
+  var server  = document.getElementById('server').value.trim();
+  // 关键: 客户端从页面 URL 读参数, 所以先把它写进地址栏
+  history.replaceState(null, '', '?' + new URLSearchParams({ matchId: matchId, server: server }).toString());
+  progress.textContent = 'booting...';
+  createUnityInstance(document.getElementById('unity-canvas'), {
+    dataUrl: 'asw-agentic-soccer-web.data',
+    frameworkUrl: 'asw-agentic-soccer-web.framework.js',
+    codeUrl: 'asw-agentic-soccer-web.wasm',
+    streamingAssetsUrl: 'StreamingAssets',
+    companyName: 'AWSAgenticSoccer',
+    productName: 'asw-agentic-soccer-web',
+    productVersion: '1.0',
+    arguments: ['--matchId', matchId, '--server', server]
+  }, function (p) { progress.textContent = (p * 100).toFixed(1) + '%'; })
+    .then(function (u) { progress.textContent = 'loaded — 等待 START'; window.unityInstance = u; })
+    .catch(function (e) { progress.textContent = 'ERROR'; console.error(e); });
+}
+
+// URL 里已带 matchId + server 时自动启动 (可直接分享/刷新即回放)
+(function () {
+  var q = new URLSearchParams(location.search);
+  if (q.get('matchId') && q.get('server')) setTimeout(function () {
+    try { preflight(); } catch (e) { console.log('[preflight] skipped:', e); }
+    boot();
+  }, 30);
+})();
+
+// ---------- 赛程下拉 + 预检 ----------
+// relay 只认 vendor_match_id。给错 id 时: /match/{id} → 404 "Match not found"
+//   → 客户端回退 live 模式 → 连 wss://.../ISoccerGameHub/Connect → JoinMatchAsSpectatorAsync
+//     服务端 Internal 错误 → 每 3 秒重连, 永远拿不到 match phase。
+// 症状就是 [ReplayClient] Retrying connection (attempt N) + Still waiting for match phase。
+// 所以开赛前先替客户端问一次。
+var push = window.__push || function () {};
+var warnEl = document.getElementById('warn');
+function showWarn(html, kind) {
+  var c = { bad: ['#3a1d1d', '#7a2b2b', '#ff9b9b'],
+            ok:  ['#12301c', '#2b7a45', '#9be3b4'],
+            warn:['#332c14', '#7a6a2b', '#ffe08a'] }[kind] || ['#3a1d1d', '#7a2b2b', '#ff9b9b'];
+  warnEl.style.display = 'block';
+  warnEl.style.background = c[0];
+  warnEl.style.borderBottomColor = c[1];
+  warnEl.style.color = c[2];
+  warnEl.innerHTML = html;
+}
+
+function preflight() {
+  if (location.protocol === 'file:') return;
+  var id  = document.getElementById('matchId').value.trim();
+  var srv = document.getElementById('server').value.trim().replace(/\/+$/, '');
+  if (!id || !srv) return;
+  var url = srv + '/match/' + encodeURIComponent(id);
+  push('[preflight] GET ' + url);
+  fetch(url).then(function (r) {
+    return r.text().then(function (t) { return { r: r, t: t }; });
+  }).then(function (o) {
+    if (o.r.ok) {
+      var j = null;
+      try { j = JSON.parse(o.t); } catch (e) {}
+      if (!j) { showWarn('relay 返回非 JSON（HTTP ' + o.r.status + '）', 'bad'); return; }
+      if (j.status !== 'FINISHED') {
+        showWarn('⚠ 这场 status = <b>' + j.status + '</b>，不是 <b>FINISHED</b>。<br>'
+          + '客户端会切成 <b>live 模式</b>连实时对局；实时对局必须正在跑，否则你会看到 '
+          + '<b>Retrying connection (attempt N)</b> 无限重连 + '
+          + '<b>Still waiting for match phase … gameClient=False</b>。<br>'
+          + '<b>回放请挑 FINISHED 的场次</b>（下拉框里都是）。', 'warn');
+      } else {
+        showWarn('✓ matchId 有效：<b>' + (j.homeTeam && j.homeTeam.name) + '</b> vs <b>'
+          + (j.awayTeam && j.awayTeam.name) + '</b>　status=FINISHED — 可以回放。', 'ok');
+      }
+    } else if (o.r.status === 404) {
+      showWarn('✗ <b>relay 不认识这个 matchId（404 ' + o.t.slice(0, 60) + '）</b><br>'
+        + '必须填 <b>vendor_match_id</b>（下拉框里那种 UUID），<b>不是</b>门户网址里的 match_id。<br>'
+        + '继续点 Load 的话，客户端会退回 live 模式并<b>无限重连</b> —— 就是你之前看到的 '
+        + 'Retrying connection / Still waiting for match phase。', 'bad');
+    } else {
+      showWarn('relay 返回 HTTP <b>' + o.r.status + '</b>：' + o.t.slice(0, 200), 'bad');
+    }
+    push('[preflight] → HTTP ' + o.r.status);
+  }).catch(function (e) {
+    showWarn('✗ 连不上 relay（<b>' + srv + '</b>）：' + e + '<br>检查 server 地址 / 网络 / 代理。', 'bad');
+    push('[preflight] FAIL ' + e);
+  });
+}
+
+document.getElementById('boot').addEventListener('click', preflight);
+document.getElementById('matchId').addEventListener('change', preflight);
+
+fetch('/__matches').then(function (r) { return r.json(); }).then(function (d) {
+  if (!d || !d.items) { push('[pick] /__matches 不可用: ' + (d && d.error)); return; }
+  var sel = document.getElementById('pick');
+  sel.innerHTML = '<option value="">— 本地赛程：' + d.count + ' 场可回放 —</option>';
+  d.items.forEach(function (m) {
+    var o = document.createElement('option');
+    o.value = m.vendor_match_id;
+    o.textContent = (m.starting_at || '').slice(0, 16).replace('T', ' ') + '  '
+      + m.home + ' ' + m.home_score + '-' + m.away_score + ' ' + m.away
+      + (m.is_practice ? '  [练习]' : '');
+    sel.appendChild(o);
+  });
+  sel.addEventListener('change', function () {
+    if (!sel.value) return;
+    document.getElementById('matchId').value = sel.value;
+    preflight();
+  });
+  push('[pick] 载入 ' + d.count + ' 场');
+}).catch(function (e) { push('[pick] /__matches 失败: ' + e); });
+
+</script>
+</body>
+</html>
