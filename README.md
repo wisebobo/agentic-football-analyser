@@ -1,7 +1,7 @@
 # Agentic Football · Match Intel Console
 
 一个面向 **AWS Agentic Football Cup**（5v5 虚拟足球锦标赛）的**全栈赛事情报台**。
-后端用 FastAPI 抓取并落库官方比赛数据，前端用 React 提供「比赛分析 / 数据统计 / 赛事重播 / 赛事排行 / 赛事配置」五合一控制台，并内置基于 Unity WebGL 的官方回放客户端，外加一套独立的 5-Agent 提示词工程库。
+后端用 FastAPI 抓取并落库官方比赛数据，前端用 React 提供「比赛分析 / 数据统计 / 赛事重播 / 赛事排行 / 赛事配置」五合一控制台，并内置基于 Unity WebGL 的官方回放客户端。
 
 > 一句话定位：**把官方 REST API 的比赛/逐 tick 指令数据，变成可查询、可可视化、可回放的分析界面。**
 
@@ -12,10 +12,10 @@
 | 层 | 技术 | 说明 |
 |---|---|---|
 | 后端 | Python 3.9+ · FastAPI · Uvicorn · httpx | REST API + 上游取数 + SQLite 落库 |
-| 数据库 | SQLite（`server/data/agentic_football.db`） | 零运维本地库，自动建表 |
+| 数据库 | SQLite | 零运维本地库，首次运行自动建表 |
 | 前端 | React 19 · TypeScript · Vite 8 · react-konva · recharts · oxlint | 控制台 UI + 图表 + 球场渲染 |
 | 回放 | Unity WebGL（`asw-agentic-soccer-web`）+ CORS 代理 | 官方 `ReplayClient` 场景 |
-| 脚本 | Bash / PowerShell / Python | 一键启动、端口清理、Unity 静态托管 |
+| 脚本 | Bash / PowerShell | 一键启动、端口清理 |
 
 ---
 
@@ -24,23 +24,22 @@
 ```
 agentic-football/
 ├── server/                  # 后端（FastAPI）
-│   ├── main.py              # 应用入口：CORS / 路由挂载 / Unity 静态资源 / /health
+│   ├── main.py              # 应用入口：CORS / 路由挂载 / /health
 │   ├── db.py                # SQLite 数据层（建表 + 读写函数）
 │   ├── fetcher.py           # 上游取数层（httpx + 3 次重试，Bearer team:<CODE>）
 │   ├── fetch_service.py     # 拉取编排：比赛增量 + 积分榜快照 + fetch_runs 日志
 │   ├── requirements.txt     # fastapi / uvicorn / httpx
-│   ├── routers/
-│   │   ├── tournaments.py   # 赛事配置（按 team_code 不可变）
-│   │   ├── fetch.py         # 手动拉取 + 拉取日志
-│   │   ├── analytics.py     # 比赛 / 重播 / 统计 / 排行榜
-│   │   └── unity.py         # Unity 回放 API（matches / replays / rproxy）
-│   └── data/                # SQLite 库（运行时生成，已 gitignore）
+│   └── routers/
+│       ├── tournaments.py   # 赛事配置（按 team_code 不可变）
+│       ├── fetch.py         # 手动拉取 + 拉取日志
+│       ├── analytics.py     # 比赛 / 重播 / 统计 / 排行榜
+│       └── unity.py          # Unity 回放 API（matches / replays / rproxy）
 │
 ├── frontend/                # 前端（React + Vite）
 │   ├── index.html           # 入口 HTML
 │   ├── vite.config.ts       # 代理 /api、/health、/unity/{matches,replays,rproxy} → 后端 8000；其余 /unity/* 由 public/unity 托管
 │   ├── package.json         # React 19 / konva / recharts / oxlint
-│   ├── public/unity/        # Unity WebGL 构建产物（Vite 原生托管，gitignore）
+│   ├── public/unity/        # Unity WebGL 构建产物（Vite 原生托管）
 │   └── src/
 │       ├── api.ts          # 后端 API 客户端
 │       ├── App.tsx         # 顶层布局 + 5 个 Tab
@@ -48,23 +47,6 @@ agentic-football/
 │       ├── components/      # Analysis / Stats / Replay / Leaderboard / Setup
 │       └── unity/          # interceptors.ts（rproxy 注入）+ unity-loader.ts
 │
-├── tools/                   # Unity 回放与协议探针（独立调试工具，非后端依赖）
-│   ├── serve_unity.py       # 本地静态托管 frontend/public/unity（带 COOP/COEP + /__rproxy + /__matches），默认 8788
-│   └── unity_ws_probe.py    # 直播协议探针（MagicOnion over WebSocket 逆向）
-│
-├── prompts/                 # 5-Agent 提示词工程库（按阵型分目录）
-│   ├── 1-1-2/ 1-2-1/ 2-0-2/ 2-1-1/ 3-0-1/ 4-0-0/
-│   ├── system_default*.json # 线上默认 prompt 快照
-│   ├── GDR_*.json           # 导出的队伍部署（team export 格式）
-│   ├── README.md            # 阵型与策略总览
-│   └── README-prompts.md    # 指令集 / 游戏机制 / 已知 bug
-│
-├── docs/                    # 资料与复核报告
-│   ├── API-DATA-ACCESS.md               # 上游 API 取数方法（权威）
-│   ├── unity-replay-client-feasibility.md  # Unity 本地加载可行性复核
-│   └── *-prompts.json                   # 原始 prompt 导出快照
-│
-├── Backend/                 # 预留目录（当前为空，未使用）
 ├── start.sh  start.bat      # 一键启动（Linux/macOS · Windows）
 ├── get-pid.ps1              # 按端口查占用进程的辅助脚本（Windows）
 └── AGENTS.md                # Trellis 项目指引
@@ -101,7 +83,7 @@ agentic-football/
 
 - **Python** ≥ 3.9（FastAPI / Uvicorn / httpx）
 - **Node.js** ≥ 20.19（Vite 8 要求）
-- 可访问的上游 API（需有效的 `team_code`，见 `docs/API-DATA-ACCESS.md`）
+- 可访问的上游 API（需有效的 `team_code`）
 - 操作系统：Windows / Linux / macOS 均可
 
 ---
@@ -179,8 +161,6 @@ npm run dev -- --host 127.0.0.1
 | GET | `/unity/replays/{vendor_match_id}` | 回放二进制（本地缓存优先，miss 时从 relay 下载并缓存） |
 | GET | `/unity/rproxy?u=` | 服务端代拉远程 URL（绕浏览器 CORS） |
 
-> ⚠️ `/unity/*` API 路由必须在 `main.py` 的 `StaticFiles` 挂载**之前**注册，否则会被静态资源捕获导致 404。
-
 ---
 
 ## 7. 前端功能（5 个 Tab）
@@ -199,7 +179,7 @@ npm run dev -- --host 127.0.0.1
 
 ## 8. 数据模型（SQLite）
 
-库文件：`server/data/agentic_football.db`（首次启动自动建表）。
+数据模型由 `server/db.py` 定义，首次运行后端时自动建库与建表。
 
 | 表 | 关键字段 | 用途 |
 |---|---|---|
@@ -216,7 +196,7 @@ npm run dev -- --host 127.0.0.1
 
 ## 9. 上游 API 与鉴权（要点）
 
-完整细节见 **`docs/API-DATA-ACCESS.md`**（权威，含端点字段与「扒端点」方法）。核心记住：
+核心鉴权格式：
 
 ```
 Authorization: Bearer team:<TEAM_CODE>
@@ -226,49 +206,27 @@ Authorization: Bearer team:<TEAM_CODE>
 - **主 API（拿自己队数据）**：`https://l3fmtx4zp0.execute-api.us-east-1.amazonaws.com/prod`
 - **公开 API（看别队/联赛）**：`https://api.agenticfootballcup.ai`（无需鉴权）
 - **回放 relay**：`https://game.agentic-football.aws.dev`
-- 凭证不要入库；`frontend/public/unity/`、`server/data/replays/`、`server/data/*.db` 已加入 `.gitignore`。
 
 ---
 
 ## 10. Unity 回放
 
-回放客户端的加载有两条路径：
+回放客户端由前端 `Replay` 标签页直接经 Vite 从 `frontend/public/unity/` 托管（绝对路径 `/unity/*`），仅把数据类 API（`/unity/matches`、`/unity/replays`、`/unity/rproxy`）代理到后端 8000。后端只提供回放数据接口，不托管任何静态资源，回放二进制由后端在本地缓存。
 
-1. **经前端（默认）**：前端 `Replay` 标签页直接由 Vite 从 `frontend/public/unity/` 托管 Unity 客户端（绝对路径 `/unity/*`），仅把数据类 API（`/unity/matches`、`/unity/replays`、`/unity/rproxy`）代理到后端 8000。后端不再挂载任何静态资源，回放二进制缓存在 `server/data/replays/`。
-2. **独立托管**：`python tools/serve_unity.py`（默认 8788，避开后端 uvicorn 的 8000）。它从 `frontend/public/unity/` 静态托管，并额外提供 `/__rproxy`（CORS 代拉）和 `/__matches`（从本地库读可回放场次）。
-
-⚠️ **已知限制（见 `docs/unity-replay-client-feasibility.md`）**：本地 `frontend/public/unity/asw-agentic-soccer-web.wasm` 现已补全为完整 61.83 MB（早期曾截断）。即便如此，真·10 人坐标仍由 Unity 私有的 MagicOnion/msgpack 协议封装，REST 的 `/prompts` 只返回**球坐标 + playerCount**；且客户端视频播放需在**真 Chrome/Edge** 中打开（内置预览面板缺 H.264 解码器）。`unity_ws_probe.py` 用于逆向该直播协议。
+> 提示：客户端视频播放需在**真 Chrome/Edge** 中打开（内置预览面板可能缺 H.264 解码器）。真·10 人坐标由 Unity 私有的 MagicOnion/msgpack 协议封装，REST 的 `/prompts` 只返回**球坐标 + playerCount**。
 
 ---
 
-## 11. prompts 模块（Agent 提示词工程）
-
-`prompts/` 是 **5-Agent 比赛策略库**，按阵型分目录（`a-b-c` = DEF-MID-FWD，GK 不计入）：
-
-| 目录 | 阵型 | 说明 |
-|---|---|---|
-| `1-1-2/` | 1 后 + 1 中 + 2 前 | 早期基线，保留 v4–v27 完整迭代谱（可 A/B） |
-| **`1-2-1/`** | 1 后 + 2 中 + 1 前 | **当前主线**（精细版 + simple 极简版，推荐 simple-v5） |
-| `2-0-2/` `2-1-1/` `3-0-1/` `4-0-0/` | 各阵型 | 多前锋 / 铁桶 / 三卫 / 全前锋变体 |
-
-关键事实（详见 `prompts/README-prompts.md`）：
-- 5 人制：1 GK + 4 外场，10 个 agent 并行决策；每 tick 约 1 秒内需返回**恰好 1 条**指令。
-- **官方 12 种指令**：`MOVE_TO, PASS, SHOOT, SLIDE_TACKLE, GK_DISTRIBUTE, PRESS_BALL, MARK, INTERCEPT, FOLLOW_PLAYER, SET_STANCE, CLEAR_OVERRIDE, RESET`。**没有** `DRIBBLE/TACKLE/CLEAR/IDLE`（带球用 `MOVE_TO`）。
-- `MARK` / `FOLLOW_PLAYER` 合法但会覆盖位置规则（实测占全场 56%），做 positional play 时须在 prompt 中明确禁止。
-- 导出格式（`GDR_*.json`、`system_default*.json`）：`{version, team_name, agents:[{position, name, system_prompt, model_id}]}`。
-
----
-
-## 12. 常见问题 / 排错
+## 11. 常见问题 / 排错
 
 **Q1：前端打不开 / 提示后端未启动**
 确认后端已在 8000 跑通：`curl http://127.0.0.1:8000/health` 应返回 `{"status":"ok"}`。检查 Vite 代理配置（`frontend/vite.config.ts`）。
 
 **Q2：创建赛事报 403 / 422**
-`team_code` 无效或鉴权前缀缺失。核对 `docs/API-DATA-ACCESS.md` 的 `Bearer team:<CODE>` 格式与 `base_url` 默认值。
+`team_code` 无效或鉴权前缀缺失。核对第 9 节的 `Bearer team:<CODE>` 格式与 `base_url` 默认值。
 
 **Q3：回放页白屏**
-本地 `wasm` 被截断（第 10 节）。需要补充完整 wasm 才能运行 Unity 客户端。
+本地 `frontend/public/unity/asw-agentic-soccer-web.wasm` 须为完整 61.83 MB。若被截断，Unity 客户端无法编译启动，需补充完整 wasm。
 
 **Q4：拉取比赛报 incomplete / 部分失败**
 官方 `/matches` 仅返回**最近 20 场**，且赛后 prompt 保留期极短；单场失败不影响整体，详见 `fetch-runs` 日志（`/api/tournaments/{id}/fetch-runs`）。
@@ -278,11 +236,7 @@ Authorization: Bearer team:<TEAM_CODE>
 
 ---
 
-## 13. 备注
+## 12. 备注
 
 - 本项目由 **Trellis** 管理（见 `AGENTS.md`）。
-- `Backend/` 为预留目录，当前未使用。
 - 上游数据产权归 AWS Agentic Football Cup；本仓库仅做本地分析用途。
-=======
-# agentic-football-analyser
->>>>>>> 9e3caa036c1f0d91800d074ff95b5c095f8ffd15
