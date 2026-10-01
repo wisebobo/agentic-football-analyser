@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Agentic Football · Match Intel Console
 
 一个面向 **AWS Agentic Football Cup**（5v5 虚拟足球锦标赛）的**全栈赛事情报台**。
@@ -283,3 +284,6 @@ Authorization: Bearer team:<TEAM_CODE>
 - 本项目由 **Trellis** 管理（见 `AGENTS.md`）。
 - `Backend/` 为预留目录，当前未使用。
 - 上游数据产权归 AWS Agentic Football Cup；本仓库仅做本地分析用途。
+=======
+# agentic-football-analyser
+>>>>>>> 9e3caa036c1f0d91800d074ff95b5c095f8ffd15
