@@ -7,6 +7,8 @@ interface Shot {
   team: number;
   pid: number | null;
   pos: string;
+  /** 入球区：TL/TR/BL/BR/CENTER，与 ReplayHud 的 goalPositionLabel 映射一致 */
+  goalZone: string | null;
   startX: number;
   startZ: number;
   endX: number;
@@ -18,9 +20,32 @@ interface Shot {
 }
 
 const POS_NAMES: Record<number, string> = { 0: "GK", 1: "DF", 2: "MF", 3: "MF", 4: "FW" };
+const AIM_ZH: Record<string, string> = {
+  CENTER: "中路",
+  TL: "左上",
+  TR: "右上",
+  BL: "左下",
+  BR: "右下",
+};
 /* 禁区深度：球门线 |x|=55 往内 17 单位 → 禁区边界 |x|=38 */
 const BOX_X = 38;
 const LOOKBACK = 200;
+
+/**
+ * 从进球前一段 ticks 里找最近的 SHOOT 命令，返回 aim_location（TL/TR/BL/BR/CENTER）。
+ * 与 ReplayHud 的 AIM_ZH 映射一致。
+ */
+function extractAimLocation(ticks: ReplayTick[], goalIdx: number, team: number): string | null {
+  for (let j = goalIdx - 1; j >= Math.max(0, goalIdx - LOOKBACK); j--) {
+    for (const c of ticks[j].cmds ?? []) {
+      if (c.cmd === "SHOOT" && c.team === team) {
+        const aim = (c.params as Record<string, unknown> | null | undefined)?.aim_location;
+        if (typeof aim === "string" && AIM_ZH[aim]) return aim;
+      }
+    }
+  }
+  return null;
+}
 
 /**
  * 起射点：用「进球方 SHOOT 命令的 agent 站位」倒推，方向无关。
@@ -94,6 +119,7 @@ function detectShots(ticks: ReplayTick[], goals: GoalRow[] | null): Shot[] {
       const gz = curr.ball ? Math.max(-4, Math.min(4, curr.ball.z)) : 0;
       const start = findShotStart(ticks, i, prev, 0, true, gz);
       const g = matchGoal("home", prev.gameTime);
+      const aimLoc = extractAimLocation(ticks, i, 0);
       const trail: { x: number; z: number }[] = [];
       for (let j = start.tick; j < i; j++) {
         const b = ticks[j].ball;
@@ -103,6 +129,7 @@ function detectShots(ticks: ReplayTick[], goals: GoalRow[] | null): Shot[] {
         idx: i, gameTime: prev.gameTime, team: 0,
         pid: start.pid,
         pos: g?.position || (start.pid != null ? (POS_NAMES[start.pid] ?? "?") : "?"),
+        goalZone: aimLoc,
         agentName: g?.agent_name ?? null,
         startX: start.x, startZ: start.z,
         endX: 55, endZ: gz,
@@ -118,6 +145,7 @@ function detectShots(ticks: ReplayTick[], goals: GoalRow[] | null): Shot[] {
       const gz = curr.ball ? Math.max(-4, Math.min(4, curr.ball.z)) : 0;
       const start = findShotStart(ticks, i, prev, 1, false, gz);
       const g = matchGoal("away", prev.gameTime);
+      const aimLoc = extractAimLocation(ticks, i, 1);
       const trail: { x: number; z: number }[] = [];
       for (let j = start.tick; j < i; j++) {
         const b = ticks[j].ball;
@@ -127,6 +155,7 @@ function detectShots(ticks: ReplayTick[], goals: GoalRow[] | null): Shot[] {
         idx: i, gameTime: prev.gameTime, team: 1,
         pid: start.pid,
         pos: g?.position || (start.pid != null ? (POS_NAMES[start.pid] ?? "?") : "?"),
+        goalZone: aimLoc,
         agentName: g?.agent_name ?? null,
         startX: start.x, startZ: start.z,
         endX: -55, endZ: gz,
@@ -149,6 +178,8 @@ const OP_CLR       = "#ff5252";
 
 export default function ShotTrajectory({ replay, goals }: { replay: ReplayData | null; goals?: GoalRow[] | null }) {
   const [hovered, setHovered] = useState(-1);
+  /** 'start' | 'end' | null：区分 hover 起点还是终点，用于显示坐标 */
+  const [hoverPoint, setHoverPoint] = useState<"start" | "end" | null>(null);
 
   const shots = useMemo(() => (replay ? detectShots(replay.ticks, goals ?? null) : []), [replay, goals]);
   const ourTeam = useMemo(() => {
@@ -276,8 +307,8 @@ export default function ShotTrajectory({ replay, goals }: { replay: ReplayData |
                       points={polyPoints}
                       fill="none"
                       stroke={c}
-                      strokeWidth={isH ? 0.9 : 0.4}
-                      strokeDasharray={s.team !== ourTeam ? "2,1" : "none"}
+                      strokeWidth={isH ? 0.5 : 0.2}
+                      strokeDasharray={s.team !== ourTeam ? "1.5,1" : "none"}
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     />
@@ -285,8 +316,8 @@ export default function ShotTrajectory({ replay, goals }: { replay: ReplayData |
                     <line
                       x1={x1} y1={y1} x2={x2} y2={y2}
                       stroke={c}
-                      strokeWidth={isH ? 0.9 : 0.4}
-                      strokeDasharray={s.team !== ourTeam ? "3,1.5" : "none"}
+                      strokeWidth={isH ? 0.5 : 0.2}
+                      strokeDasharray={s.team !== ourTeam ? "2.5,1.2" : "none"}
                       strokeLinecap="round"
                     />
                   )}
@@ -304,8 +335,8 @@ export default function ShotTrajectory({ replay, goals }: { replay: ReplayData |
                     stroke="#000"
                     strokeWidth="0.2"
                     style={{ cursor: "pointer", transition: "r 0.2s" }}
-                    onMouseEnter={() => setHovered(i)}
-                    onMouseLeave={() => setHovered(-1)}
+                    onMouseEnter={() => { setHovered(i); setHoverPoint("start"); }}
+                    onMouseLeave={() => { setHovered(-1); setHoverPoint(null); }}
                   />
                   {/* 禁区射门标识环 */}
                   {s.inBox && (
@@ -326,7 +357,9 @@ export default function ShotTrajectory({ replay, goals }: { replay: ReplayData |
                     stroke={c}
                     strokeWidth={isH ? 0.45 : 0.25}
                     opacity={isH ? 1 : 0.6}
-                    style={{ transition: "r 0.2s, opacity 0.2s" }}
+                    style={{ cursor: "pointer", transition: "r 0.2s, opacity 0.2s" }}
+                    onMouseEnter={() => { setHovered(i); setHoverPoint("end"); }}
+                    onMouseLeave={() => { setHovered(-1); setHoverPoint(null); }}
                   />
                   {/* hover 时方向箭头 */}
                   {isH && (() => {
@@ -375,9 +408,14 @@ export default function ShotTrajectory({ replay, goals }: { replay: ReplayData |
                 {fmtTime(hoveredShot.gameTime)} · {hoveredShot.agentName ?? `${hoveredShot.pos} #${hoveredShot.pid ?? "?"}`}
               </div>
               <div style={{ opacity: 0.55, fontSize: 11 }}>
-                入球 {hoveredShot.endZ > 1 ? "右侧" : hoveredShot.endZ < -1 ? "左侧" : "中路"}
+                入球 {hoveredShot.goalZone ? (AIM_ZH[hoveredShot.goalZone] ?? hoveredShot.goalZone) : "--"}
                 {" · "}{hoveredShot.inBox ? "禁区" : "远射"}
               </div>
+              {hoverPoint === "end" && (
+                <div style={{ opacity: 0.45, fontSize: 11, marginTop: 2 }}>
+                  入球点 ({hoveredShot.endX.toFixed(1)}, {hoveredShot.endZ.toFixed(1)})
+                </div>
+              )}
             </div>
           )}
 
