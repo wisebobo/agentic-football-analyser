@@ -145,7 +145,7 @@ export default function Replay({ tournament }: { tournament: Tournament | null }
   }, [unityMatches]);
 
   return (
-    <div className="card">
+    <div className="card fill">
       <div className="row gap">
         <label className="sel-wrap">
           比赛：

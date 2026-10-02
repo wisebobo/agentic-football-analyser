@@ -208,12 +208,19 @@ main > *:nth-child(3) { animation-delay: 0.12s; }
 }
 
 /* ============ 卡片（HUD 角括号） ============ */
+/* 默认随内容生长（grow 但不 shrink），保证右下角括号落在内容真实底边；
+   需要压满一屏滚动内部内容的卡片（如重播页 Unity 画布）用 .card.fill */
 .card {
   position: relative;
   background: var(--panel);
   border: 1px solid var(--line);
   padding: 18px 20px;
   margin-bottom: 18px;
+  flex: 1 0 auto;
+}
+.card.fill {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
 }
@@ -234,13 +241,13 @@ section.card > h2::before {
   margin-right: 10px;
   vertical-align: -1px;
 }
-/* HUD 角括号：左上 / 右下 */
+/* HUD 角括号：左上 / 右下（臂长按容器 6% 伸缩，clamp 16–40px） */
 .card::before,
 .card::after {
   content: "";
   position: absolute;
-  width: 16px;
-  height: 16px;
+  width: clamp(16px, 6%, 40px);
+  height: clamp(16px, 6%, 40px);
   pointer-events: none;
 }
 .card::before {
@@ -460,12 +467,13 @@ tr.row-mine td:first-child { color: var(--pitch); }
   border: 1px solid var(--line);
   margin-bottom: 14px;
 }
+/* HUD 角括号：左上 / 右下（比分板尺寸较小，臂长按容器 12% 伸缩，clamp 14–28px） */
 .scoreboard::before,
 .scoreboard::after {
   content: "";
   position: absolute;
-  width: 14px;
-  height: 14px;
+  width: clamp(14px, 12%, 28px);
+  height: clamp(14px, 12%, 28px);
 }
 .scoreboard::before {
   top: -1px;
