@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS tournaments (
     base_url        TEXT NOT NULL,
     created_at      TEXT NOT NULL,
     auto_enabled    INTEGER NOT NULL DEFAULT 0,
-    practice_opponents TEXT NOT NULL DEFAULT 'aggressive,balanced'
+    practice_opponents TEXT NOT NULL DEFAULT 'aggressive,balanced',
+    rotation_offset INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS matches (
@@ -187,7 +188,7 @@ def _migrate_add_columns(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_tournaments(conn: sqlite3.Connection) -> None:
-    """为旧库的 tournaments 表补充 auto_enabled / practice_opponents 列。"""
+    """为旧库的 tournaments 表补充 auto_enabled / practice_opponents / rotation_offset 列。"""
     cur = conn.cursor()
     cols = {r[1] for r in cur.execute("PRAGMA table_info(tournaments)").fetchall()}
     if "auto_enabled" not in cols:
@@ -196,6 +197,8 @@ def _migrate_tournaments(conn: sqlite3.Connection) -> None:
         cur.execute(
             "ALTER TABLE tournaments ADD COLUMN practice_opponents TEXT NOT NULL DEFAULT 'aggressive,balanced'"
         )
+    if "rotation_offset" not in cols:
+        cur.execute("ALTER TABLE tournaments ADD COLUMN rotation_offset INTEGER NOT NULL DEFAULT 0")
 
 
 def _now() -> str:
@@ -251,6 +254,14 @@ def set_practice_opponents(local_id: int, opponents: list) -> None:
         "UPDATE tournaments SET practice_opponents=? WHERE id=?",
         (",".join(o for o in opponents if o), local_id),
     )
+    conn.commit()
+    conn.close()
+
+
+def advance_rotation_offset(local_id: int, new_offset: int) -> None:
+    """持久化练习赛对手轮换指针（"下一次从池内第几个开始"）。"""
+    conn = get_conn()
+    conn.execute("UPDATE tournaments SET rotation_offset=? WHERE id=?", (new_offset, local_id))
     conn.commit()
     conn.close()
 
