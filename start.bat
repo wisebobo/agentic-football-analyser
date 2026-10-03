@@ -79,7 +79,7 @@ echo.
 
 REM --- 5. Start backend ---
 echo Starting backend (127.0.0.1:%BACKEND_PORT%) ...
-start "AgenticFootball Backend" cmd /c "cd /d %SERVER_DIR% && uvicorn main:app --host 127.0.0.1 --port %BACKEND_PORT%"
+start "AgenticFootball Backend" cmd /c "cd /d %SERVER_DIR% && uvicorn main:app --reload --host 127.0.0.1 --port %BACKEND_PORT%"
 echo   -> Backend window opened
 echo.
 

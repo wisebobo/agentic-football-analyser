@@ -385,6 +385,41 @@ export function estimateRate(as: Anchor[], prior: number): number {
 const GOAL_VIDEO_LEAD_MS = 1260;
 /** 兜底锚点允许的最大帧距（秒）——超过说明最近的进球不合适，宁可放弃 */
 const GOAL_VIDEO_TOL_SEC = 8;
+/**
+ * 客户端 `Phase: COUNTDOWN_TO_KICKOFF → FIRST_HALF` 日志**晚于**画面真正开球的时间。
+ * 两次整页录屏实测（2026-10-01，~45fps 抓帧 + 逐帧绿茵占比判"覆盖层消失"）：
+ *   第一次 0.79s、第二次 0.62s ⇒ 取 700ms 补偿。
+ * 不加补偿会把游标在开球时刻往回拽这么多。
+ */
+/**
+ * ⭐ 决策「应用延迟」：面板该显示哪条决策，才是画面上正在执行的那条。
+ *
+ * 实测依据（59c9cce2，两个互相独立的方法）：
+ *  ① 对 564 次「命令变更」逐个测量：API 把决策记在 tick N，而二进制里球员的行为名
+ *     （`fr[6][i][8]` = CoachMoveTo / CoachFollowPlayer / …）要到 **N+51 帧（≈0.99s）**
+ *     才切换成新命令 —— **100% 都晚**，范围 +27..+156 帧。
+ *     这个 0.99s 与 `tick_prompts.response_time` 中位 **1135ms** 吻合：
+ *     引擎在 tick N 调用 agent，等回复到达才应用 ⇒ 视频要到约 1s 后才表现这条命令。
+ *  ② 用全场采样比对「面板显示的指令」与「画面里球员实际在执行的命令」的一致率：
+ *       tick ≤ 帧−0   : 51.3%   ← 原实现（= 把新决策提前 1s 显示）
+ *       tick ≤ 帧−20  : 56.2%
+ *       tick ≤ 帧−35  : 59.2%
+ *       tick ≤ 帧−51  : 59.6%   ← 峰值
+ *       tick ≤ 帧−65  : 56.9%
+ *       tick ≤ 帧−80  : 53.1%
+ *       tick ≤ 帧−100 : 47.5%
+ * ⇒ 指令列表应按 `帧 − 51` 取 tick；而**状态快照（球位置/控球）仍按当前帧取**，
+ *   因为 tick 里的 gameState 记录的就是"该 tick 时刻的状态"。
+ */
+const CMD_APPLY_LAG_FRAMES = 51;
+
+/**
+ * 客户端 `Phase: COUNTDOWN_TO_KICKOFF → FIRST_HALF` 日志**晚于**画面真正开球的时间。
+ * 两次整页录屏实测（2026-10-01，~45fps 抓帧 + 逐帧绿茵占比判"覆盖层消失"）：
+ *   第一次 0.79s、第二次 0.62s ⇒ 取 700ms 补偿。
+ * 不加补偿会把游标在开球时刻往回拽这么多。
+ */
+const RESUME_LOG_DELAY_MS = 700;
 
 // =====================================================================================
 
@@ -474,6 +509,8 @@ export default function ReplayHud({
   const holdRef = useRef(0);
   const startFrameRef = useRef(5);
   const goalsRef = useRef<ReplayGoal[]>([]);
+  /** 已被「恢复比赛」日志认领过的进球序号，避免同一条 w1 被重复锚定 */
+  const usedResumeRef = useRef<Set<number>>(new Set());
   const kickoffRef = useRef<number | null>(null);
   const lastGoalLogAtRef = useRef(0);
   const stripRef = useRef<HTMLDivElement | null>(null);
@@ -598,13 +635,54 @@ export default function ReplayHud({
       if (e.kind === "phase_change" && e.phase) {
         setCounts((c) => ({ ...c, phase: c.phase + 1 }));
         setClientPhase(e.phase.to);
-        // ⚠️ 这里**故意不做游标锚定**（实测有系统性偏差，2026-10-01）：
-        //   客户端在「进球回放流程播完」时就把 phase 切成 COUNTDOWN_TO_KICKOFF
-        //   （实测 +36.52s ≈ 回放帧 3703），而二进制里对应的 phase-5 段（w0）要到
-        //   帧 3871 才开始 —— 相差 168 帧 / 3.3s。若按"最近时刻"配到 w0，会把游标
-        //   向前硬跳 +2.79s，并把自校准速率从 50.1 污染到 65.3，之后要等下一个进球日志
-        //   才纠得回来。开球 / 进球这两类权威日志已经给出精确锚点（15 个进球 ≈ 每 10s
-        //   一次重锚），phase 日志只用作"客户端阶段"标签展示。
+        // ── 方向一：进入开球等待（FIRST_HALF → COUNTDOWN_TO_KICKOFF）⇒ **绝不锚定**
+        //   客户端在「进球回放流程播完」时就把 phase 切过去（实测 ≈ 回放帧 3703），
+        //   而二进制里对应的 phase-5 段（w0=3871）要晚 3.3s。硬配到 w0 会把游标
+        //   向前猛跳、还会污染自校准速率。
+        // ── 方向二：恢复比赛（COUNTDOWN_TO_KICKOFF → FIRST_HALF）⇒ **锚定到 w1**
+        //   ⭐ 依据是画面证据（2026-10-01 整页录屏 45fps + 逐帧绿茵占比）：
+        //     这条日志在 +44.95s，而"倒计时覆盖层消失、球场铺满屏幕"在 +45.07s
+        //     —— 只差 0.12s；同时刻面板帧 4023 对二进制 w1=4021 差 2 帧。
+        //   ⇒ 它是**精确的开球锚点**。钉住它之后，"倒数 3-2-1 → 开球"这一下
+        //     面板不再滞后（未加时实测此处偏 0.43s，且状态徽标会晚 ~0.4s 才从
+        //     「动画/等待中」翻到「比赛进行」），整场也额外多出 15 次重锚。
+        if (e.phase.from === "FIRST_HALF" && e.phase.to === "COUNTDOWN_TO_KICKOFF") {
+          return;
+        }
+        if (e.phase.from === "COUNTDOWN_TO_KICKOFF" && e.phase.to === "FIRST_HALF") {
+          const as = anchorsRef.current;
+          if (as.length) {
+            let pick: { g: ReplayGoal; k: number } | null = null;
+            let pd = Infinity;
+            goalsRef.current.forEach((g, k) => {
+              if (typeof g.w1 !== "number" || usedResumeRef.current.has(k)) return;
+              const pt = timeAt(g.w1, as, rateRef.current);
+              if (pt == null) return;
+              const d = Math.abs(pt - e.at);
+              if (d < pd) {
+                pd = d;
+                pick = { g, k };
+              }
+            });
+            // 容差 8s：w1 与日志之间只该差零点几秒，配不上宁可放弃（不乱跳）
+            if (pick && pd / 1000 <= 8) {
+              const { g, k } = pick as { g: ReplayGoal; k: number };
+              usedResumeRef.current.add(k);
+              // ⚠️ 必须补偿：两次整页录屏实测（45fps + 逐帧绿茵占比）显示，
+              //   这条日志比"倒计时覆盖层消失、画面真正恢复"**晚 0.62s / 0.79s**
+              //   （客户端是在过场 UI 收尾后才切的 phase）⇒ 直接锚到 w1 会把游标
+              //   往回拽 ~0.7s。按实测补偿后才与画面同刻。
+              const lead = Math.round((RESUME_LOG_DELAY_MS / 1000) * rateRef.current);
+              pushAnchor({
+                t: e.at,
+                frame: (g.w1 as number) + lead,
+                label: `恢复比赛 / 开球（帧 ${g.w1}+${lead}）`,
+                src: "client",
+                kind: "resume",
+              });
+            }
+          }
+        }
         return;
       }
       if (e.kind === "goal_video") {
@@ -675,6 +753,7 @@ export default function ReplayHud({
     setPaused(false);
     setFrameIdx(0);
     anchorsRef.current = [];
+    usedResumeRef.current = new Set();
     holdRef.current = 0;
     startFrameRef.current = 5;
     rateRef.current = priorRef.current;
@@ -823,7 +902,17 @@ export default function ReplayHud({
   );
 
   const curTickIdx = useMemo(() => lastIndexOfFrame(tickFrames, frameIdx), [tickFrames, frameIdx]);
+  /** 状态快照（球位置 / 控球）——tick 里的 gameState 就是该 tick 时刻的状态 ⇒ 按当前帧取 */
   const frame = curTickIdx >= 0 ? ticks[curTickIdx] : null;
+  /**
+   * 指令列表用**滞后 51 帧**的 tick：引擎在 tick N 调用 agent、等 1s 才拿到回复并应用，
+   * 所以画面上此刻正在执行的是 tick `帧−51` 那条决策（实测一致率 59.6% vs 51.3%）。
+   */
+  const cmdTickIdx = useMemo(
+    () => lastIndexOfFrame(tickFrames, frameIdx - CMD_APPLY_LAG_FRAMES),
+    [tickFrames, frameIdx],
+  );
+  const cmdFrame = cmdTickIdx >= 0 ? ticks[cmdTickIdx] : null;
   /** 当前帧所属的播放段（比赛进行 / 进球庆祝 / 开球等待 …）。
    *  ⚠️ 必须声明在下面几个派生量之前——它们是 const，不走变量提升，
    *     在初始化前访问会抛 `Cannot access 'seg' before initialization`。 */
@@ -834,10 +923,25 @@ export default function ReplayHud({
    * 本身就是"倒数期间"下的，这段滞后是**数据粒度**，不是同步误差。
    * 实测开球瞬间的 tick 落后 0.16~1.72s。显式标出来，避免被误读成"面板没对齐"。
    */
+  /** 取指令时用的"基准帧"（= 当前帧 − 决策应用延迟） */
+  const cmdBasis = frameIdx - CMD_APPLY_LAG_FRAMES;
+  /** 画面上正在执行的这条决策，已经生效多久（秒） */
   const cmdLagSec =
-    curTickIdx >= 0 && tickFrames[curTickIdx] != null && rate > 0
-      ? Math.max(0, (frameIdx - tickFrames[curTickIdx]) / rate)
+    cmdTickIdx >= 0 && tickFrames[cmdTickIdx] != null && rate > 0
+      ? Math.max(0, (cmdBasis - tickFrames[cmdTickIdx]) / rate)
       : null;
+
+  /**
+   * 距离引擎下发**下一条**决策还有多久（秒）。
+   * 引擎是「被调用才决策」（实测每 ~1.94s 一次，间隔 96~103 帧，无缺失），
+   * 状态突变后画面会先"继续执行上一条"，把倒计时显出来就不会被误读成面板卡住。
+   */
+  const nextTickInSec = useMemo(() => {
+    if (cmdTickIdx < 0 || rate <= 0) return null;
+    const nf = tickFrames[cmdTickIdx + 1];
+    if (nf == null) return null;
+    return Math.max(0, (nf - (frameIdx - CMD_APPLY_LAG_FRAMES)) / rate);
+  }, [cmdTickIdx, tickFrames, frameIdx, rate]);
 
   /**
    * 按**帧号**精确推算比分（实测：客户端画面记分牌在进球帧就跳，而 tick 快照
@@ -866,17 +970,53 @@ export default function ReplayHud({
     const dt = seg.dt || 0.02;
     return seg.gt0 + (frameIdx - seg.f0) * dt;
   }, [seg, frameIdx]);
+
+  /**
+   * 当前帧是否落在某个进球的展示窗口内（进球帧 → 恢复比赛帧）。
+   *
+   * 为什么要单独做：一般规则显示的是「此刻场上正在执行的那条指令」，而进球时
+   * 场上执行的**已经不是 SHOOT 了** —— 实测 15 个进球，导致进球的 SHOOT 决策
+   * 中位落在进球帧前 **105 帧（≈2s）**，早就被下一条 tick 顶掉。用户看到"进球了
+   * 但指令列表里没有 SHOOT"，等一会儿冒出来的那个 SHOOT 其实是**进球之后新一轮**
+   * 的决策（例：进球2 F=4391，最近 SHOOT 在 tick 4186；下一个 SHOOT 在 4586，
+   * 面板要 4.8s 后才显示）。⇒ 进球窗口内额外把"这球来自哪条 SHOOT"标出来。
+   */
+  const activeGoal = useMemo(() => {
+    if (!goals.length) return null;
+    for (let k = goals.length - 1; k >= 0; k -= 1) {
+      const g = goals[k];
+      if (typeof g.f !== "number") continue;
+      const end = typeof g.w1 === "number" ? g.w1 : g.f + 260;
+      if (frameIdx >= g.f && frameIdx <= end) return g;
+    }
+    return null;
+  }, [goals, frameIdx]);
+
+  /** 该进球**之前**、进球方最近一次 SHOOT 决策（用来解释这球怎么来的） */
+  const goalShot = useMemo(() => {
+    if (!activeGoal || activeGoal.s == null || typeof activeGoal.f !== "number") return null;
+    const side = activeGoal.s;
+    for (let i = ticks.length - 1; i >= 0; i -= 1) {
+      const tk = ticks[i];
+      if (tk.t == null || tk.t > activeGoal.f) continue;
+      const hit = (tk.cmds ?? []).find((c) => c.team === side && c.cmd === "SHOOT");
+      if (hit) return { tick: tk.t, cmd: hit };
+      // 再往前找最多 3s，找不到就放弃（不硬凑）
+      if (activeGoal.f - tk.t > 160) return null;
+    }
+    return null;
+  }, [activeGoal, ticks]);
   const ourTeam = frame?.our_team ?? data?.ticks?.[0]?.our_team ?? null;
 
   const cmdsByTeam = useMemo(() => {
     const out: Record<number, ReplayCmd[]> = { 0: [], 1: [] };
-    for (const c of frame?.cmds ?? []) {
+    for (const c of cmdFrame?.cmds ?? []) {
       const team = c.team ?? -1;
       if (team === 0 || team === 1) out[team].push(c);
     }
     for (const k of [0, 1]) out[k].sort((a, b) => (a.pid ?? 9) - (b.pid ?? 9));
     return out;
-  }, [frame]);
+  }, [cmdFrame]);
 
   const panel = (children: React.ReactNode, color = "#cbd5e1") => (
     <div
@@ -1238,12 +1378,13 @@ export default function ReplayHud({
             墙钟 {mmss(wall)} / {mmss(tl.duration_sec)} · 帧 {frameIdx}/{totalFrames} ·{" "}
             {rate.toFixed(1)}fps{goals.length ? ` · 进球 ${goals.length}` : ""}
             {clientFrames && clientFrames !== totalFrames ? ` · 客户端帧数 ${clientFrames}` : ""}
-            {cmdLagSec != null && frame?.t != null ? (
+            {cmdLagSec != null && cmdFrame?.t != null ? (
               <span
                 style={{ color: cmdLagSec > 1.2 ? "#f59e0b" : "#64748b" }}
-                title="引擎每约 2s 才下发一次决策，所以这是数据固有的粒度，不是面板没对齐"
+                title="指令按「当前帧 − 51 帧」取：引擎调用 agent 要 ~1s 才拿到回复并应用，所以这里显示的就是画面上球员正在执行的那条决策；括号内是它已经生效多久 · 新决策 = 距下一条指令还有多久"
               >
-                {" · "}指令 tick {frame.t}（{cmdLagSec.toFixed(1)}s 前）
+                {" · "}执行中指令 tick {cmdFrame.t}（已生效 {cmdLagSec.toFixed(1)}s）
+                {nextTickInSec != null ? ` · 新决策 ${nextTickInSec.toFixed(1)}s 后` : ""}
               </span>
             ) : null}
           </div>
@@ -1334,6 +1475,43 @@ export default function ReplayHud({
           </div>
         )}
       </div>
+
+      {/* 进球窗口：把「这球来自哪条 SHOOT」单独标出来。
+          一般指令列表显示的是"此刻场上正在执行"的指令，而进球那一刻场上已经不是 SHOOT 了，
+          单独标注才能回答"为什么进球了却看不到 shoot"。 */}
+      {activeGoal ? (
+        <div
+          style={{
+            background: "#1e293b",
+            border: "1px solid #f59e0b",
+            borderRadius: 6,
+            padding: 8,
+            fontSize: 11,
+            color: "#fde68a",
+          }}
+        >
+          <b>
+            ⚽ 进球 {activeGoal.h}-{activeGoal.a}
+          </b>
+          <span style={{ color: "#94a3b8" }}> · 帧 {activeGoal.f}</span>
+          {goalShot ? (
+            <div style={{ marginTop: 3, color: "#cbd5e1" }}>
+              这球来自 <b style={{ color: "#f59e0b" }}>tick {goalShot.tick}</b> 的{" "}
+              <b style={{ color: "#f59e0b" }}>SHOOT</b>（P{goalShot.cmd.pid} ·{" "}
+              {cmdDetail(goalShot.cmd)}）
+              <span style={{ color: "#64748b" }}>
+                {" "}
+                · 比进球早{" "}
+                {(((activeGoal.f as number) - goalShot.tick) / (rate || 51)).toFixed(1)}s
+              </span>
+            </div>
+          ) : (
+            <div style={{ marginTop: 3, color: "#64748b" }}>
+              进球前 3s 内没有 SHOOT 决策（补射 / 带球入网 / 乌龙等）
+            </div>
+          )}
+        </div>
+      ) : null}
 
       {renderTeam(0, "HOME / 0 队")}
       {renderTeam(1, "AWAY / 1 队")}
