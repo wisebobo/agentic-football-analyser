@@ -1,6 +1,6 @@
 import type {
   Tournament, MatchRow, MatchFull, LeaderboardResp, FetchRun, Stats, ReplayData,
-  PracticeMatchResult,
+  PracticeMatchResult, SchedulerStatus,
 } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -41,6 +41,9 @@ export const api = {
 
   stats: (tid: number) => req<Stats>(`/api/stats?tournament_id=${tid}`),
   leaderboard: (tid: number) => req<LeaderboardResp>(`/api/tournaments/${tid}/leaderboard`),
+
+  /** 调度器节拍状态（全局）；失败抛错，由调用方决定降级 */
+  schedulerStatus: () => req<SchedulerStatus>("/api/scheduler/status"),
 };
 
 export const DEFAULT_BASE_URL = "https://l3fmtx4zp0.execute-api.us-east-1.amazonaws.com/prod";

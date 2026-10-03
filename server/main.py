@@ -30,6 +30,12 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/scheduler/status")
+def scheduler_status():
+    """调度器节拍状态：下次运行时间 / 上轮结束 / 是否执行中。"""
+    return scheduler.status()
+
+
 @app.on_event("startup")
 def _startup():
     scheduler.start()

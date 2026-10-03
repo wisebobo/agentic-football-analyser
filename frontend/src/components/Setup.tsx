@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, DEFAULT_BASE_URL } from "../api";
 import { useApp } from "../App";
-import type { FetchRun, Tournament } from "../types";
+import type { FetchRun, SchedulerStatus, Tournament } from "../types";
 
 // 练习赛对手：与后端 VALID_OPPONENTS 同序（轮换序）；label 中文短名
 const OPPONENTS: { key: string; label: string }[] = [
@@ -22,12 +22,25 @@ export default function Setup({ tournament }: { tournament: Tournament }) {
   const [force, setForce] = useState(false);
   const [runs, setRuns] = useState<FetchRun[]>([]);
   const [savingIds, setSavingIds] = useState<number[]>([]);
+  // 调度器节拍状态：5s 轮询同步（失败静默保留旧值）+ 1s 本地 ticker 驱动倒计时
+  const [sched, setSched] = useState<SchedulerStatus | null>(null);
+  const [now, setNow] = useState(Date.now());
 
   const loadRuns = () => api.fetchRuns(tournament.id).then(setRuns).catch(() => {});
   useEffect(() => {
     loadRuns();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tournament.id]);
+
+  useEffect(() => {
+    let live = true;
+    const load = () =>
+      api.schedulerStatus().then((s) => { if (live) setSched(s); }).catch(() => {});
+    load();
+    const poll = setInterval(load, 5000);
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => { live = false; clearInterval(poll); clearInterval(tick); };
+  }, []);
 
   const create = async () => {
     setMsg("");
@@ -109,6 +122,19 @@ export default function Setup({ tournament }: { tournament: Tournament }) {
 
       <section className="card">
         <h2>已创建赛事（{tournaments.length}）</h2>
+        {sched && (
+          <p className="hint">
+            {(() => {
+              const anyOn = tournaments.some((t) => t.auto_enabled);
+              if (!anyOn) {
+                return `自动任务 未启用 —— 勾选下方「自动」后，每 ${Math.round(sched.interval_seconds / 60)} 分钟自动拉取数据并约练习赛`;
+              }
+              const remain = Math.max(0, Math.round((sched.next_run_epoch * 1000 - now) / 1000));
+              const cd = remain > 0 ? `（约 ${Math.ceil(remain / 60)} 分后）` : "（即将执行）";
+              return `自动任务 每 ${Math.round(sched.interval_seconds / 60)} 分钟 · 下次运行 ${sched.next_run_at ?? "…"}${cd}${sched.running ? " · 执行中…" : ""}`;
+            })()}
+          </p>
+        )}
         <p className="hint">
           对手 = 该赛事练习赛可用的对手子集（按 强攻→均衡→防守 顺序轮换）；全部不勾 = 不自动约练习赛。
         </p>

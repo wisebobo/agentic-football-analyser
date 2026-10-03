@@ -18,6 +18,18 @@ export interface PracticeMatchResult {
   response: unknown;
 }
 
+/** 调度器节拍状态（全局共享，非 per-tournament） */
+export interface SchedulerStatus {
+  interval_seconds: number;
+  /** 下次运行时间，本地 'HH:MM:SS' */
+  next_run_at: string | null;
+  /** 下次运行 epoch 秒（后端时钟），前端倒计时基准 */
+  next_run_epoch: number;
+  last_cycle_end: string | null;
+  /** 本轮是否正在执行 */
+  running: boolean;
+}
+
 export interface MatchRow {
   match_id: string;
   our_side: string | null;
