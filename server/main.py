@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 import db
 import scheduler
@@ -34,6 +35,34 @@ def health():
 def scheduler_status():
     """调度器节拍状态：下次运行时间 / 上轮结束 / 是否执行中。"""
     return scheduler.status()
+
+
+MIN_INTERVAL_S, MAX_INTERVAL_S = 60, 3600
+
+
+class SchedulerConfigIn(BaseModel):
+    enabled: bool | None = None
+    interval_seconds: int | None = None
+
+
+@app.get("/api/scheduler/config")
+def get_scheduler_config():
+    """调度器全局配置（启用开关 + 间隔）。"""
+    return db.get_scheduler_config()
+
+
+@app.post("/api/scheduler/config")
+def set_scheduler_config(body: SchedulerConfigIn):
+    """更新调度器配置（部分更新：只传需要改的字段），改库即热生效。"""
+    if body.interval_seconds is not None and not (MIN_INTERVAL_S <= body.interval_seconds <= MAX_INTERVAL_S):
+        raise HTTPException(400, f"interval_seconds 超出范围（{MIN_INTERVAL_S}~{MAX_INTERVAL_S} 秒）")
+    return db.set_scheduler_config(enabled=body.enabled, interval_seconds=body.interval_seconds)
+
+
+@app.post("/api/scheduler/run")
+def scheduler_run():
+    """手动立即执行一轮（拉数据 + 约练习赛），完成后下次运行时间从此刻起算。"""
+    return scheduler.trigger_now()
 
 
 @app.on_event("startup")

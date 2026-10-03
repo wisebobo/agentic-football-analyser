@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, DEFAULT_BASE_URL } from "../api";
 import { useApp } from "../App";
-import type { FetchRun, SchedulerStatus, Tournament } from "../types";
+import type { FetchRun, SchedulerConfig, SchedulerStatus, Tournament } from "../types";
 
 // 练习赛对手：与后端 VALID_OPPONENTS 同序（轮换序）；label 中文短名
 const OPPONENTS: { key: string; label: string }[] = [
@@ -25,6 +25,10 @@ export default function Setup({ tournament }: { tournament: Tournament }) {
   // 调度器节拍状态：5s 轮询同步（失败静默保留旧值）+ 1s 本地 ticker 驱动倒计时
   const [sched, setSched] = useState<SchedulerStatus | null>(null);
   const [now, setNow] = useState(Date.now());
+  // 全局调度配置（存库热生效）：开关 + 间隔（UI 用分钟，1~60）
+  const [cfg, setCfg] = useState<SchedulerConfig | null>(null);
+  const [minInput, setMinInput] = useState("");
+  const [runBusy, setRunBusy] = useState(false);
 
   const loadRuns = () => api.fetchRuns(tournament.id).then(setRuns).catch(() => {});
   useEffect(() => {
@@ -40,6 +44,13 @@ export default function Setup({ tournament }: { tournament: Tournament }) {
     const poll = setInterval(load, 5000);
     const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => { live = false; clearInterval(poll); clearInterval(tick); };
+  }, []);
+
+  // 初始化配置：间隔输入框与保存按钮的输入校验都以它为准
+  useEffect(() => {
+    api.schedulerConfig()
+      .then((c) => { setCfg(c); setMinInput(String(Math.round(c.interval_seconds / 60))); })
+      .catch(() => {});
   }, []);
 
   const create = async () => {
@@ -100,6 +111,54 @@ export default function Setup({ tournament }: { tournament: Tournament }) {
     }
   };
 
+  /** 保存全局调度配置（部分字段）；成功后刷新配置与节拍状态 */
+  const saveCfg = async (body: { enabled?: boolean; interval_seconds?: number }) => {
+    const c = await api.schedulerSetConfig(body);
+    setCfg(c);
+    if (body.interval_seconds !== undefined) setMinInput(String(Math.round(c.interval_seconds / 60)));
+    api.schedulerStatus().then(setSched).catch(() => {});
+  };
+
+  const toggleSched = async (enabled: boolean) => {
+    setMsg("");
+    try {
+      await saveCfg({ enabled });
+    } catch (e) {
+      setMsg(`定时任务开关切换失败：${(e as Error).message}`);
+    }
+  };
+
+  const saveInterval = async () => {
+    const m = Number(minInput);
+    if (!Number.isInteger(m) || m < 1 || m > 60) {
+      setMsg("间隔须为 1~60 的整数（分钟）");
+      return;
+    }
+    setMsg("");
+    try {
+      await saveCfg({ interval_seconds: m * 60 });
+      setMsg("间隔已更新，下一轮起生效");
+    } catch (e) {
+      setMsg(`间隔保存失败：${(e as Error).message}`);
+    }
+  };
+
+  const runNow = async () => {
+    setMsg("");
+    setRunBusy(true);
+    try {
+      const r = await api.schedulerRun();
+      setMsg(r.ran
+        ? "手动执行完成，下次运行时间已重新起算"
+        : "上一轮尚未结束，本次跳过");
+      await api.schedulerStatus().then(setSched).catch(() => {});
+    } catch (e) {
+      setMsg(`立即运行失败：${(e as Error).message}`);
+    } finally {
+      setRunBusy(false);
+    }
+  };
+
   return (
     <div>
       <section className="card">
@@ -125,15 +184,46 @@ export default function Setup({ tournament }: { tournament: Tournament }) {
         {sched && (
           <p className="hint">
             {(() => {
+              if (!cfg || !cfg.enabled) {
+                return "定时任务 已关闭 —— 勾选下方「启用定时任务」后按间隔自动拉取数据并约练习赛";
+              }
               const anyOn = tournaments.some((t) => t.auto_enabled);
               if (!anyOn) {
-                return `自动任务 未启用 —— 勾选下方「自动」后，每 ${Math.round(sched.interval_seconds / 60)} 分钟自动拉取数据并约练习赛`;
+                return `定时任务已启用，但所有赛事「自动」均未勾选 —— 勾选下方任一「自动」后，每 ${Math.round(cfg.interval_seconds / 60)} 分钟自动拉取数据并约练习赛`;
               }
               const remain = Math.max(0, Math.round((sched.next_run_epoch * 1000 - now) / 1000));
               const cd = remain > 0 ? `（约 ${Math.ceil(remain / 60)} 分后）` : "（即将执行）";
-              return `自动任务 每 ${Math.round(sched.interval_seconds / 60)} 分钟 · 下次运行 ${sched.next_run_at ?? "…"}${cd}${sched.running ? " · 执行中…" : ""}`;
+              return `定时任务 每 ${Math.round(cfg.interval_seconds / 60)} 分钟 · 下次运行 ${sched.next_run_at ?? "…"}${cd}${sched.running ? " · 执行中…" : ""}`;
             })()}
           </p>
+        )}
+        {cfg && (
+          <div className="row">
+            <label>
+              <input
+                type="checkbox"
+                checked={cfg.enabled}
+                onChange={(e) => toggleSched(e.target.checked)}
+              />{" "}
+              启用定时任务
+            </label>
+            <label title="1~60 分钟，下一轮起生效">
+              间隔
+              <input
+                type="number"
+                min={1}
+                max={60}
+                value={minInput}
+                onChange={(e) => setMinInput(e.target.value)}
+                style={{ width: 64, margin: "0 4px" }}
+              />
+              分钟
+              <button onClick={saveInterval} style={{ marginLeft: 6 }}>保存</button>
+            </label>
+            <button onClick={runNow} disabled={runBusy} className="btn-primary">
+              {runBusy ? "执行中（同步，可能数分钟）…" : "立即运行"}
+            </button>
+          </div>
         )}
         <p className="hint">
           对手 = 该赛事练习赛可用的对手子集（按 强攻→均衡→防守 顺序轮换）；全部不勾 = 不自动约练习赛。

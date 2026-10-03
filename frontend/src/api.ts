@@ -1,6 +1,6 @@
 import type {
   Tournament, MatchRow, MatchFull, LeaderboardResp, FetchRun, Stats, ReplayData,
-  PracticeMatchResult, SchedulerStatus,
+  PracticeMatchResult, SchedulerStatus, SchedulerConfig, SchedulerRunResult,
 } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -44,6 +44,12 @@ export const api = {
 
   /** 调度器节拍状态（全局）；失败抛错，由调用方决定降级 */
   schedulerStatus: () => req<SchedulerStatus>("/api/scheduler/status"),
+  /** 全局调度配置（存库，热生效） */
+  schedulerConfig: () => req<SchedulerConfig>("/api/scheduler/config"),
+  schedulerSetConfig: (body: { enabled?: boolean; interval_seconds?: number }) =>
+    req<SchedulerConfig>("/api/scheduler/config", { method: "POST", body: JSON.stringify(body) }),
+  /** 手动立即执行一轮（阻塞至完成；上一轮未结束则跳过） */
+  schedulerRun: () => req<SchedulerRunResult>("/api/scheduler/run", { method: "POST" }),
 };
 
 export const DEFAULT_BASE_URL = "https://l3fmtx4zp0.execute-api.us-east-1.amazonaws.com/prod";

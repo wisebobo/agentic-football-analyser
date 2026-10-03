@@ -28,6 +28,20 @@ export interface SchedulerStatus {
   last_cycle_end: string | null;
   /** 本轮是否正在执行 */
   running: boolean;
+  /** 全局开关是否启用（来自 scheduler_config） */
+  enabled: boolean;
+}
+
+/** 全局调度配置（存库，热生效） */
+export interface SchedulerConfig {
+  enabled: boolean;
+  interval_seconds: number;
+}
+
+/** 手动「立即运行」结果；上一轮未结束则跳过（ran=false，无 next） */
+export interface SchedulerRunResult {
+  ran: boolean;
+  next?: SchedulerStatus;
 }
 
 export interface MatchRow {

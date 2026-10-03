@@ -114,6 +114,12 @@ CREATE TABLE IF NOT EXISTS leaderboard_rows (
 );
 CREATE INDEX IF NOT EXISTS idx_lb_t ON leaderboard_rows(tournament_id, fetched_at);
 
+CREATE TABLE IF NOT EXISTS scheduler_config (
+    id               INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled          INTEGER NOT NULL DEFAULT 1,
+    interval_seconds INTEGER NOT NULL DEFAULT 300
+);
+
 CREATE TABLE IF NOT EXISTS fetch_runs (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     tournament_id    TEXT NOT NULL,
@@ -145,8 +151,17 @@ def init_db() -> None:
     _migrate_add_columns(conn)
     # 迁移：为已有 DB 的 tournaments 表补加 auto_enabled 列
     _migrate_tournaments(conn)
+    _ensure_scheduler_config(conn)
     conn.commit()
     conn.close()
+
+
+def _ensure_scheduler_config(conn: sqlite3.Connection) -> None:
+    """scheduler_config 表（由 SCHEMA 建表）保证存在单行默认配置。"""
+    conn.execute(
+        "INSERT INTO scheduler_config (id, enabled, interval_seconds) VALUES (1, 1, 300) "
+        "ON CONFLICT(id) DO NOTHING"
+    )
 
 
 def _migrate_add_columns(conn: sqlite3.Connection) -> None:
@@ -822,3 +837,30 @@ def list_fetch_runs(tournament_id: str, limit: int = 20):
         (tournament_id, limit)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ---------- scheduler_config（单行全局配置） ----------
+
+def get_scheduler_config() -> dict:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT enabled, interval_seconds FROM scheduler_config WHERE id=1").fetchone()
+    conn.close()
+    return {"enabled": bool(row["enabled"]), "interval_seconds": row["interval_seconds"]} if row \
+        else {"enabled": True, "interval_seconds": 300}
+
+
+def set_scheduler_config(*, enabled: bool | None = None,
+                        interval_seconds: int | None = None) -> dict:
+    """部分更新调度器配置（None 字段不动），返回最新配置。"""
+    conn = get_conn()
+    if enabled is not None:
+        conn.execute("UPDATE scheduler_config SET enabled=? WHERE id=1", (1 if enabled else 0,))
+    if interval_seconds is not None:
+        conn.execute("UPDATE scheduler_config SET interval_seconds=? WHERE id=1", (interval_seconds,))
+    conn.commit()
+    row = conn.execute(
+        "SELECT enabled, interval_seconds FROM scheduler_config WHERE id=1").fetchone()
+    conn.close()
+    return {"enabled": bool(row["enabled"]), "interval_seconds": row["interval_seconds"]} if row \
+        else {"enabled": enabled or True, "interval_seconds": interval_seconds or 300}
