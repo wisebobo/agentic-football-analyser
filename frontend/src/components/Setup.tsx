@@ -55,6 +55,15 @@ export default function Setup({ tournament }: { tournament: Tournament }) {
     }
   };
 
+  const toggleAuto = async (t: Tournament, enabled: boolean) => {
+    try {
+      await api.toggleAuto(t.id, enabled);
+      await refresh();
+    } catch (e) {
+      setMsg(`自动开关切换失败：${(e as Error).message}`);
+    }
+  };
+
   return (
     <div>
       <section className="card">
@@ -79,7 +88,7 @@ export default function Setup({ tournament }: { tournament: Tournament }) {
         <h2>已创建赛事（{tournaments.length}）</h2>
         <table className="tbl">
           <thead>
-            <tr><th>#</th><th>team code</th><th>队伍</th><th>赛事</th><th>创建时间</th></tr>
+            <tr><th>#</th><th>team code</th><th>队伍</th><th>赛事</th><th>创建时间</th><th>自动</th></tr>
           </thead>
           <tbody>
             {tournaments.map((t) => (
@@ -89,6 +98,13 @@ export default function Setup({ tournament }: { tournament: Tournament }) {
                 <td>{t.team_name || "—"}</td>
                 <td>{t.tournament_name || t.tournament_id}</td>
                 <td>{t.created_at}</td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={!!t.auto_enabled}
+                    onChange={(e) => toggleAuto(t, e.target.checked)}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>

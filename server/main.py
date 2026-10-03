@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import db
+import scheduler
 from routers import tournaments, fetch, analytics, unity
 
 app = FastAPI(title="Agentic Football", version="2.0")
@@ -27,3 +28,8 @@ app.include_router(unity.router, tags=["unity"])
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.on_event("startup")
+def _startup():
+    scheduler.start()

@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS tournaments (
     tournament_name TEXT,
     detail_json     TEXT,
     base_url        TEXT NOT NULL,
-    created_at      TEXT NOT NULL
+    created_at      TEXT NOT NULL,
+    auto_enabled    INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS matches (
@@ -140,6 +141,8 @@ def init_db() -> None:
     conn.executescript(SCHEMA)
     # 迁移：为已有 DB 补加 is_practice / starting_at 列
     _migrate_add_columns(conn)
+    # 迁移：为已有 DB 的 tournaments 表补加 auto_enabled 列
+    _migrate_tournaments(conn)
     conn.commit()
     conn.close()
 
@@ -182,6 +185,14 @@ def _migrate_add_columns(conn: sqlite3.Connection) -> None:
                         list(updates.values()) + [mid])
 
 
+def _migrate_tournaments(conn: sqlite3.Connection) -> None:
+    """为旧库的 tournaments 表补充 auto_enabled 列（默认 0，新赛事默认关）。"""
+    cur = conn.cursor()
+    cols = {r[1] for r in cur.execute("PRAGMA table_info(tournaments)").fetchall()}
+    if "auto_enabled" not in cols:
+        cur.execute("ALTER TABLE tournaments ADD COLUMN auto_enabled INTEGER NOT NULL DEFAULT 0")
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -200,8 +211,8 @@ def create_tournament(*, team_code, tournament_id, team_id, team_name,
     conn = get_conn()
     cur = conn.execute(
         """INSERT INTO tournaments
-           (team_code, tournament_id, team_id, team_name, tournament_name, detail_json, base_url, created_at)
-           VALUES (?,?,?,?,?,?,?,?)""",
+           (team_code, tournament_id, team_id, team_name, tournament_name, detail_json, base_url, created_at, auto_enabled)
+           VALUES (?,?,?,?,?,?,?,?,0)""",
         (team_code, tournament_id, team_id, team_name, tournament_name,
          detail_json, base_url, _now()),
     )
@@ -215,10 +226,17 @@ def list_tournaments():
     conn = get_conn()
     rows = conn.execute(
         """SELECT id, team_code, tournament_id, team_id, team_name,
-                  tournament_name, base_url, created_at
+                  tournament_name, base_url, created_at, auto_enabled
            FROM tournaments ORDER BY id""").fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def set_auto_enabled(local_id: int, enabled: int) -> None:
+    conn = get_conn()
+    conn.execute("UPDATE tournaments SET auto_enabled=? WHERE id=?", (1 if enabled else 0, local_id))
+    conn.commit()
+    conn.close()
 
 
 def get_tournament(local_id: int):

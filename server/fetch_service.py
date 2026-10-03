@@ -8,6 +8,35 @@ import db
 import fetcher
 
 FINISHED = {"finished", "completed", "ended"}
+# 库里已是这些状态的比赛不再重拉（cancelled 永远不会有比分，避免每轮白白刷新）
+NO_REFRESH = FINISHED | {"cancelled"}
+
+# ---------- 练习赛对手轮换 ----------
+_PRACTICE_OPPONENTS = ["aggressive", "balanced", "defensive"]
+# key: team_code, value: 下一个要用的索引（0-based）。进程重启后清空，自然从 aggressive 开始。
+_rotation: dict = {}
+
+
+def _next_opponent(team_code: str) -> str:
+    idx = _rotation.get(team_code, 0)
+    opp = _PRACTICE_OPPONENTS[idx]
+    _rotation[team_code] = (idx + 1) % len(_PRACTICE_OPPONENTS)
+    return opp
+
+
+def trigger_practice_match(local_id: int) -> dict:
+    """对该赛事触发 1 次练习赛（按 team_code 维度轮换 aggressive/balanced/defensive）。"""
+    t = db.get_tournament(local_id)
+    if not t:
+        raise ValueError(f"tournament #{local_id} 不存在")
+    opponent = _next_opponent(t["team_code"])
+    client = fetcher._client()
+    try:
+        data, err = fetcher.trigger_practice_match_upstream(
+            client, t["base_url"], t["team_code"], t["team_id"], opponent)
+    finally:
+        client.close()
+    return {"opponent": opponent, "ok": err is None, "err": err, "response": data}
 
 
 def fetch_tournament(local_id: int, force: bool = False) -> dict:
@@ -39,9 +68,11 @@ def fetch_tournament(local_id: int, force: bool = False) -> dict:
             mid = it.get("id") or it.get("match_id")
             if not mid:
                 continue
-            item_status = it.get("status")
             saved = db.match_status(mid)
-            if saved and str(item_status or "").lower() in FINISHED and not force:
+            # 以"库里已存的状态"判断是否跳过：库里的快照若是终态则无需重拉；
+            # 若库里是 in_progress 等中间态，即使上游列表已显示 completed，
+            # 也必须重拉详情以回填比分（否则无比分快照会永远滞留）。
+            if saved and str(saved or "").lower() in NO_REFRESH and not force:
                 skipped += 1
                 continue
             detail, derr = fetcher.fetch_match_detail(client, base, code, mid)

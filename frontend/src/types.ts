@@ -7,6 +7,14 @@ export interface Tournament {
   tournament_name: string | null;
   base_url: string;
   created_at: string;
+  auto_enabled: number;
+}
+
+export interface PracticeMatchResult {
+  opponent: string;
+  ok: boolean;
+  err: string | null;
+  response: unknown;
 }
 
 export interface MatchRow {

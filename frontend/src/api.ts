@@ -1,5 +1,6 @@
 import type {
   Tournament, MatchRow, MatchFull, LeaderboardResp, FetchRun, Stats, ReplayData,
+  PracticeMatchResult,
 } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -22,6 +23,10 @@ export const api = {
   listTournaments: () => req<Tournament[]>("/api/tournaments"),
   createTournament: (body: { team_code: string; tournament_id: string; base_url?: string }) =>
     req<Tournament>("/api/tournaments", { method: "POST", body: JSON.stringify(body) }),
+  toggleAuto: (tid: number, enabled: boolean) =>
+    req<Tournament>(`/api/tournaments/${tid}/auto`, { method: "POST", body: JSON.stringify({ enabled }) }),
+  triggerPracticeMatch: (tid: number) =>
+    req<PracticeMatchResult>(`/api/tournaments/${tid}/practice-match`, { method: "POST" }),
 
   fetchNow: (tid: number, force = false) =>
     req<FetchRun>(`/api/tournaments/${tid}/fetch${force ? "?force=true" : ""}`, { method: "POST" }),
