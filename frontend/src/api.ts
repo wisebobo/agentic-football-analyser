@@ -25,6 +25,8 @@ export const api = {
     req<Tournament>("/api/tournaments", { method: "POST", body: JSON.stringify(body) }),
   toggleAuto: (tid: number, enabled: boolean) =>
     req<Tournament>(`/api/tournaments/${tid}/auto`, { method: "POST", body: JSON.stringify({ enabled }) }),
+  setOpponents: (tid: number, opponents: string[]) =>
+    req<Tournament>(`/api/tournaments/${tid}/opponents`, { method: "POST", body: JSON.stringify({ opponents }) }),
   triggerPracticeMatch: (tid: number) =>
     req<PracticeMatchResult>(`/api/tournaments/${tid}/practice-match`, { method: "POST" }),
 

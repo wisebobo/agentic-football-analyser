@@ -8,6 +8,7 @@ export interface Tournament {
   base_url: string;
   created_at: string;
   auto_enabled: number;
+  practice_opponents: string;
 }
 
 export interface PracticeMatchResult {

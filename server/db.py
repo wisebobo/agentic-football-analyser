@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS tournaments (
     detail_json     TEXT,
     base_url        TEXT NOT NULL,
     created_at      TEXT NOT NULL,
-    auto_enabled    INTEGER NOT NULL DEFAULT 0
+    auto_enabled    INTEGER NOT NULL DEFAULT 0,
+    practice_opponents TEXT NOT NULL DEFAULT 'aggressive,balanced'
 );
 
 CREATE TABLE IF NOT EXISTS matches (
@@ -186,11 +187,15 @@ def _migrate_add_columns(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_tournaments(conn: sqlite3.Connection) -> None:
-    """为旧库的 tournaments 表补充 auto_enabled 列（默认 0，新赛事默认关）。"""
+    """为旧库的 tournaments 表补充 auto_enabled / practice_opponents 列。"""
     cur = conn.cursor()
     cols = {r[1] for r in cur.execute("PRAGMA table_info(tournaments)").fetchall()}
     if "auto_enabled" not in cols:
         cur.execute("ALTER TABLE tournaments ADD COLUMN auto_enabled INTEGER NOT NULL DEFAULT 0")
+    if "practice_opponents" not in cols:
+        cur.execute(
+            "ALTER TABLE tournaments ADD COLUMN practice_opponents TEXT NOT NULL DEFAULT 'aggressive,balanced'"
+        )
 
 
 def _now() -> str:
@@ -211,8 +216,8 @@ def create_tournament(*, team_code, tournament_id, team_id, team_name,
     conn = get_conn()
     cur = conn.execute(
         """INSERT INTO tournaments
-           (team_code, tournament_id, team_id, team_name, tournament_name, detail_json, base_url, created_at, auto_enabled)
-           VALUES (?,?,?,?,?,?,?,?,0)""",
+           (team_code, tournament_id, team_id, team_name, tournament_name, detail_json, base_url, created_at, auto_enabled, practice_opponents)
+           VALUES (?,?,?,?,?,?,?,?,0,'aggressive,balanced')""",
         (team_code, tournament_id, team_id, team_name, tournament_name,
          detail_json, base_url, _now()),
     )
@@ -226,7 +231,7 @@ def list_tournaments():
     conn = get_conn()
     rows = conn.execute(
         """SELECT id, team_code, tournament_id, team_id, team_name,
-                  tournament_name, base_url, created_at, auto_enabled
+                  tournament_name, base_url, created_at, auto_enabled, practice_opponents
            FROM tournaments ORDER BY id""").fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -235,6 +240,17 @@ def list_tournaments():
 def set_auto_enabled(local_id: int, enabled: int) -> None:
     conn = get_conn()
     conn.execute("UPDATE tournaments SET auto_enabled=? WHERE id=?", (1 if enabled else 0, local_id))
+    conn.commit()
+    conn.close()
+
+
+def set_practice_opponents(local_id: int, opponents: list) -> None:
+    """写练习赛对手子集（逗号分隔；空列表存空串 = 不约练习赛）。"""
+    conn = get_conn()
+    conn.execute(
+        "UPDATE tournaments SET practice_opponents=? WHERE id=?",
+        (",".join(o for o in opponents if o), local_id),
+    )
     conn.commit()
     conn.close()
 

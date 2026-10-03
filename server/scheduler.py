@@ -32,8 +32,13 @@ def _run_cycle_once() -> None:
                 print(f"[scheduler] fetch failed: tournament {lid}: {e}")
             try:
                 r = fetch_service.trigger_practice_match(lid)
-                print(f"[scheduler] practice {'ok' if r['ok'] else 'failed'}: "
-                      f"tournament {lid} opponent={r['opponent']} err={r['err']}")
+                if r["ok"]:
+                    print(f"[scheduler] practice ok: tournament {lid} opponent={r['opponent']}")
+                elif r.get("err") == "no opponents selected":
+                    print(f"[scheduler] practice skipped (no opponents selected): tournament {lid}")
+                else:
+                    print(f"[scheduler] practice failed: tournament {lid} "
+                          f"opponent={r['opponent']} err={r['err']}")
             except Exception as e:
                 print(f"[scheduler] practice failed: tournament {lid}: {e}")
         print("[scheduler] cycle end")

@@ -12,24 +12,35 @@ FINISHED = {"finished", "completed", "ended"}
 NO_REFRESH = FINISHED | {"cancelled"}
 
 # ---------- 练习赛对手轮换 ----------
-_PRACTICE_OPPONENTS = ["aggressive", "balanced", "defensive"]
-# key: team_code, value: 下一个要用的索引（0-based）。进程重启后清空，自然从 aggressive 开始。
+# 上游支持的全部对手（全局固定序 = 轮换序；各赛事可用子集由 DB 行级配置 practice_opponents 决定）
+VALID_OPPONENTS = ("aggressive", "balanced", "defensive")
+# key: team_code, value: 下一个要用的索引（0-based）。进程重启后清空，自然从头开始。
 _rotation: dict = {}
 
 
-def _next_opponent(team_code: str) -> str:
-    idx = _rotation.get(team_code, 0)
-    opp = _PRACTICE_OPPONENTS[idx]
-    _rotation[team_code] = (idx + 1) % len(_PRACTICE_OPPONENTS)
-    return opp
+def _opponent_pool(t: dict) -> list:
+    """从赛事行的 practice_opponents 解析出可用子集（按 VALID_OPPONENTS 顺序过滤）。"""
+    raw = (t.get("practice_opponents") or "").split(",")
+    return [o for o in VALID_OPPONENTS if o in raw]
+
+
+def _next_opponent(team_code: str, pool: list) -> str:
+    # % len(pool) 兜底：子集变更后旧指针可能越界
+    idx = _rotation.get(team_code, 0) % len(pool)
+    _rotation[team_code] = idx + 1
+    return pool[idx]
 
 
 def trigger_practice_match(local_id: int) -> dict:
-    """对该赛事触发 1 次练习赛（按 team_code 维度轮换 aggressive/balanced/defensive）。"""
+    """对该赛事触发 1 次练习赛（按 team_code 维度在赛事配置的对手子集内轮换）。
+    子集为空（前端全不勾）→ 不发上游请求，直接返回 ok=False。"""
     t = db.get_tournament(local_id)
     if not t:
         raise ValueError(f"tournament #{local_id} 不存在")
-    opponent = _next_opponent(t["team_code"])
+    pool = _opponent_pool(t)
+    if not pool:
+        return {"opponent": None, "ok": False, "err": "no opponents selected", "response": None}
+    opponent = _next_opponent(t["team_code"], pool)
     client = fetcher._client()
     try:
         data, err = fetcher.trigger_practice_match_upstream(

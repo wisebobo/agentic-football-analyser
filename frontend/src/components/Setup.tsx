@@ -3,6 +3,13 @@ import { api, DEFAULT_BASE_URL } from "../api";
 import { useApp } from "../App";
 import type { FetchRun, Tournament } from "../types";
 
+// 练习赛对手：与后端 VALID_OPPONENTS 同序（轮换序）；label 中文短名
+const OPPONENTS: { key: string; label: string }[] = [
+  { key: "aggressive", label: "强攻" },
+  { key: "balanced", label: "均衡" },
+  { key: "defensive", label: "防守" },
+];
+
 export default function Setup({ tournament }: { tournament: Tournament }) {
   const { refresh, tournaments } = useApp();
   const [teamCode, setTeamCode] = useState("");
@@ -14,6 +21,7 @@ export default function Setup({ tournament }: { tournament: Tournament }) {
   const [fetching, setFetching] = useState(false);
   const [force, setForce] = useState(false);
   const [runs, setRuns] = useState<FetchRun[]>([]);
+  const [savingIds, setSavingIds] = useState<number[]>([]);
 
   const loadRuns = () => api.fetchRuns(tournament.id).then(setRuns).catch(() => {});
   useEffect(() => {
@@ -64,6 +72,21 @@ export default function Setup({ tournament }: { tournament: Tournament }) {
     }
   };
 
+  const toggleOpponents = async (t: Tournament, key: string, next: boolean) => {
+    const cur = (t.practice_opponents || "").split(",").filter(Boolean);
+    const list = next ? [...new Set([...cur, key])] : cur.filter((o) => o !== key);
+    setMsg("");
+    setSavingIds((s) => [...s, t.id]);
+    try {
+      await api.setOpponents(t.id, list);
+      await refresh();
+    } catch (e) {
+      setMsg(`对手配置保存失败：${(e as Error).message}`);
+    } finally {
+      setSavingIds((s) => s.filter((x) => x !== t.id));
+    }
+  };
+
   return (
     <div>
       <section className="card">
@@ -86,9 +109,12 @@ export default function Setup({ tournament }: { tournament: Tournament }) {
 
       <section className="card">
         <h2>已创建赛事（{tournaments.length}）</h2>
+        <p className="hint">
+          对手 = 该赛事练习赛可用的对手子集（按 强攻→均衡→防守 顺序轮换）；全部不勾 = 不自动约练习赛。
+        </p>
         <table className="tbl">
           <thead>
-            <tr><th>#</th><th>team code</th><th>队伍</th><th>赛事</th><th>创建时间</th><th>自动</th></tr>
+            <tr><th>#</th><th>team code</th><th>队伍</th><th>赛事</th><th>创建时间</th><th>自动</th><th>对手</th></tr>
           </thead>
           <tbody>
             {tournaments.map((t) => (
@@ -104,6 +130,23 @@ export default function Setup({ tournament }: { tournament: Tournament }) {
                     checked={!!t.auto_enabled}
                     onChange={(e) => toggleAuto(t, e.target.checked)}
                   />
+                </td>
+                <td>
+                  {OPPONENTS.map((o) => {
+                    const on = (t.practice_opponents || "").split(",").includes(o.key);
+                    const saving = savingIds.includes(t.id);
+                    return (
+                      <label key={o.key} title={o.key} style={{ marginRight: 6, opacity: saving ? 0.5 : 1 }}>
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          disabled={saving}
+                          onChange={() => toggleOpponents(t, o.key, !on)}
+                        />{" "}
+                        {o.label}
+                      </label>
+                    );
+                  })}
                 </td>
               </tr>
             ))}
